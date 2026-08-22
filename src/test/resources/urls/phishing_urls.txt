@@ -1,0 +1,12 @@
+# Real-world-style phishing URL fixtures used by UrlFixtureTest.
+# Each line should trigger at least one UrlAnalyzer signal.
+http://paypa1.com/signin/verify-account
+http://paypal-secure-login-update.com/webapps
+http://192.168.1.1/wp-login.php
+http://free-gift-card.tk/claim?winner=1
+https://bit.ly/3fakeLink
+http://amazon-account-verification.info/signin
+http://apple.secure-id-locked.com/unlock
+http://micros0ft-support.com/security-alert
+https://chase-secure-banking.ml/login
+http://example.com/redirect?url=http://credential-harvest.tk/login

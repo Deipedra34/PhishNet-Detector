@@ -1,0 +1,12 @@
+# Real-world-style legitimate URL fixtures used by UrlFixtureTest.
+# None of these should trigger any UrlAnalyzer signal.
+https://www.google.com/search?q=phishnet
+https://www.paypal.com/signin
+https://appleid.apple.com/account
+https://www.microsoft.com/en-us/microsoft-365
+https://www.amazon.com/gp/css/order-history
+https://mail.google.com/mail/u/0/#inbox
+https://github.com/anthropics
+https://www.wikipedia.org/wiki/Phishing
+https://www.dropbox.com/login
+https://www.linkedin.com/feed/

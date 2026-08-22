@@ -1,0 +1,8 @@
+From: "PayPal Security" <alert@random-mailer.info>
+To: victim@example.com
+Subject: Account Alert
+Content-Type: text/plain; charset=UTF-8
+
+We noticed a login from a new device.
+
+If this wasn't you, please secure your account.

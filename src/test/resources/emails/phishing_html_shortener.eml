@@ -1,0 +1,6 @@
+From: Notice <notice@example.com>
+To: victim@example.com
+Subject: Update
+Content-Type: text/html; charset=UTF-8
+
+<html><body><p>Click <a href="http://bit.ly/xyz123">here</a> to confirm your details.</p></body></html>

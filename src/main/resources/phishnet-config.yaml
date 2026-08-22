@@ -1,0 +1,108 @@
+# PhishNet Detector - default configuration.
+#
+# Everything here is tunable without recompiling: pass a modified copy of
+# this file via `--config <path>` on the CLI. Weights are arbitrary points
+# added to a signal's total contribution to the 0-100 risk score; thresholds
+# define where the Low/Medium/High bands start.
+
+brands:
+  - google
+  - paypal
+  - apple
+  - microsoft
+  - amazon
+  - facebook
+  - netflix
+  - instagram
+  - bankofamerica
+  - chase
+  - wellsfargo
+  - dhl
+  - fedex
+  - linkedin
+  - dropbox
+
+suspiciousTlds:
+  - tk
+  - ml
+  - ga
+  - cf
+  - gq
+  - xyz
+  - top
+  - work
+  - click
+  - country
+  - link
+  - support
+  - zip
+  - review
+
+urlShorteners:
+  - bit.ly
+  - tinyurl.com
+  - goo.gl
+  - t.co
+  - ow.ly
+  - is.gd
+  - buff.ly
+  - rebrand.ly
+  - cutt.ly
+  - shorte.st
+  - rb.gy
+  - tiny.cc
+
+urgencyKeywords:
+  en:
+    - "your account will be suspended"
+    - "account will be locked"
+    - "account has been locked"
+    - "verify immediately"
+    - "verify your account"
+    - "unusual activity detected"
+    - "unusual sign-in activity"
+    - "click here immediately"
+    - "action required"
+    - "confirm your identity"
+    - "limited time"
+    - "failure to comply"
+    - "urgent action"
+    - "your payment was declined"
+    - "suspicious login attempt"
+  tr:
+    - "hesabınız askıya alınacak"
+    - "hesabınız askıya alındı"
+    - "hemen doğrulayın"
+    - "hesabınızı doğrulayın"
+    - "olağandışı hareket tespit edildi"
+    - "hesabınız kilitlendi"
+    - "acil işlem gerekiyor"
+    - "kimliğinizi doğrulayın"
+    - "sınırlı süre"
+    - "hemen tıklayın"
+    - "şüpheli giriş"
+
+scoring:
+  weights:
+    homograph: 35
+    typosquatting: 30
+    urlShortener: 15
+    suspiciousTld: 20
+    ipAddressHost: 25
+    longOrObfuscatedUrl: 15
+    excessiveQueryParams: 10
+    encodedCharacters: 10
+    nestedRedirect: 20
+    sslMissing: 20
+    sslExpired: 25
+    sslSelfSigned: 20
+    sslUntrustedCa: 15
+    urgencyLanguage: 20
+    senderMismatch: 25
+    riskyEmbeddedLink: 15
+  mediumThreshold: 30
+  highThreshold: 60
+  typosquattingMaxDistance: 2
+  longUrlThreshold: 75
+  maxQueryParams: 8
+  encodedCharThreshold: 5
