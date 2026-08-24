@@ -73,7 +73,8 @@ flowchart LR
 
     subgraph CLI
         M["Main / CliArgs"]
-        RF["ReportFormatter"]
+        RF["ReportFormatter (--json)"]
+        RP["Reporter (text, --verbose/--quiet, color)"]
     end
 
     CFG["phishnet-config.yaml\n(brands, TLDs, keywords, weights)"]
@@ -89,10 +90,12 @@ flowchart LR
     CFG -.-> EA
     CFG -.-> RS
     RS -- "RiskScore" --> RF
+    RS -- "RiskScore" --> RP
     M --> UA
     M --> EA
     M --> RS
-    RF --> OUT["stdout: human report or JSON"]
+    RF --> OUT["stdout: JSON"]
+    RP --> OUT2["stdout: summary or verbose report, or one quiet line"]
 ```
 
 Each analyzer only *describes what it found* as a list of `Signal` objects
@@ -154,12 +157,28 @@ java -jar target/phishnet.jar --email suspicious-message.eml
 # Analyze a newline-separated file of URLs ('#' lines are treated as comments)
 java -jar target/phishnet.jar --batch urls.txt
 
+# Show each analyzer's internal reasoning (parsed URL/email details), not just the summary
+java -jar target/phishnet.jar --url "http://paypa1-secure-login.tk/verify" --verbose
+
+# One machine-parsable line only ("LEVEL SCORE TARGET") - good for piping into other tools.
+# Exit code reflects risk too: 1 for HIGH, 0 otherwise, so it's scriptable.
+java -jar target/phishnet.jar --url "http://paypa1-secure-login.tk/verify" --quiet
+
 # Machine-readable JSON output, for reporting/CI use
 java -jar target/phishnet.jar --url "https://example.com" --json
+
+# Force plain output even on a color-capable terminal
+java -jar target/phishnet.jar --url "https://example.com" --no-color
 
 # Use a custom config instead of the bundled defaults
 java -jar target/phishnet.jar --url "https://example.com" --config my-config.yaml
 ```
+
+Output is colored automatically when stdout is a real terminal (HIGH=red, MEDIUM=yellow, LOW=green,
+bold labels, ⚠/✓/✗ symbols). Colors are skipped automatically when output is piped or redirected to
+a file, and can be turned off explicitly with `--no-color` or by setting the `NO_COLOR` environment
+variable ([no-color.org](https://no-color.org/)). `--quiet` output never includes color, since it's
+meant to be machine-parsable.
 
 ### Sample output
 
@@ -168,10 +187,30 @@ $ java -jar target/phishnet.jar --url "http://paypa1-secure-login.tk/verify?redi
 Target: http://paypa1-secure-login.tk/verify?redirect=http://evil.tk/x
 Risk Score: 70/100 (HIGH)
 Signals:
-  - [suspiciousTld] URL uses a TLD commonly abused for phishing (.tk)
-  - [typosquatting] Domain segment 'paypa1' closely resembles brand 'paypal' (edit distance 1) (paypa1-secure-login.tk)
-  - [nestedRedirect] URL appears to embed another URL in its query string, a common open-redirect phishing pattern
+  ✗ [suspiciousTld] URL uses a TLD commonly abused for phishing
+  ✗ [typosquatting] Domain segment 'paypa1' closely resembles brand 'paypal' (edit distance 1)
+  ✗ [nestedRedirect] URL appears to embed another URL in its query string, a common open-redirect phishing pattern
 Recommendation: High risk of phishing. Do not click any links, enter credentials, or open attachments. Report and delete.
+```
+
+```
+$ java -jar target/phishnet.jar --url "http://paypa1-secure-login.tk/verify" --verbose
+Target: http://paypa1-secure-login.tk/verify
+Risk Score: 55/100 (MEDIUM)
+Signals:
+  ⚠ [suspiciousTld] URL uses a TLD commonly abused for phishing (.tk)
+  ⚠ [typosquatting] Domain segment 'paypa1' closely resembles brand 'paypal' (edit distance 1) (paypa1-secure-login.tk)
+Recommendation: Some phishing indicators found. Proceed with caution: verify the sender/domain through a separate trusted channel before interacting.
+Details:
+  scheme=http, host=paypa1-secure-login.tk, subdomain=, domain=paypa1-secure-login, tld=tk, ip=false
+  path=/verify, query params=0
+```
+
+```
+$ java -jar target/phishnet.jar --url "http://paypa1-secure-login.tk/verify?redirect=http://evil.tk/x" --quiet
+HIGH 70 http://paypa1-secure-login.tk/verify?redirect=http://evil.tk/x
+$ echo $?
+1
 ```
 
 ```
@@ -236,8 +275,8 @@ src/main/java/com/phishnet/
   analyzer/   UrlAnalyzer, SslChecker, EmailAnalyzer
   model/      Signal, RiskScore, UrlComponents, PhishNetConfig, ...
   scoring/    RiskScorer
-  cli/        Main, CliArgs, ReportFormatter
-  util/       LevenshteinDistance, HomoglyphUtil, ConfigLoader
+  cli/        Main, CliArgs, ReportFormatter, Reporter, OutputLevel
+  util/       LevenshteinDistance, HomoglyphUtil, ConfigLoader, AnsiColor, ColorSupport
 src/main/resources/phishnet-config.yaml
 src/test/java/...            (mirrors the layout above)
 src/test/resources/urls/     phishing_urls.txt, legitimate_urls.txt

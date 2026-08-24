@@ -152,4 +152,85 @@ class MainTest {
         assertEquals(0, result.exitCode());
         assertTrue(result.stdout().contains("typosquatting"));
     }
+
+    // --- verbose / quiet / no-color -------------------------------------------
+
+    @Test
+    void verboseFlagShowsDetailsSection() {
+        Captured result = runMain("--url", "http://paypa1-secure-login.tk/verify", "--verbose");
+        assertEquals(0, result.exitCode());
+        assertTrue(result.stdout().contains("Details:"));
+        assertTrue(result.stdout().contains("host=paypa1-secure-login.tk"));
+    }
+
+    @Test
+    void defaultModeDoesNotShowDetailsSection() {
+        Captured result = runMain("--url", "http://paypa1-secure-login.tk/verify");
+        assertEquals(0, result.exitCode());
+        assertTrue(!result.stdout().contains("Details:"));
+    }
+
+    @Test
+    void quietModePrintsSingleLineFormat() {
+        Captured result = runMain("--url", "https://example.com", "--quiet");
+        assertEquals(0, result.exitCode());
+        assertEquals("LOW 0 https://example.com", result.stdout().strip());
+    }
+
+    @Test
+    void shortQuietFlagAlsoWorks() {
+        Captured result = runMain("--url", "https://example.com", "-q");
+        assertEquals("LOW 0 https://example.com", result.stdout().strip());
+    }
+
+    @Test
+    void quietModeExitsOneForHighRisk() {
+        Captured result = runMain("--url",
+                "http://paypa1-secure-login.tk/verify?redirect=http://evil.tk/x", "--quiet");
+        assertEquals(1, result.exitCode());
+        assertTrue(result.stdout().startsWith("HIGH"));
+    }
+
+    @Test
+    void nonQuietModeExitsZeroEvenForHighRisk() {
+        Captured result = runMain("--url",
+                "http://paypa1-secure-login.tk/verify?redirect=http://evil.tk/x");
+        assertEquals(0, result.exitCode());
+    }
+
+    @Test
+    void verboseAndQuietTogetherIsUsageError() {
+        Captured result = runMain("--url", "https://example.com", "--verbose", "--quiet");
+        assertEquals(2, result.exitCode());
+        assertTrue(result.stderr().contains("--verbose"));
+        assertTrue(result.stderr().contains("--quiet"));
+    }
+
+    @Test
+    void quietModeNeverContainsAnsiEscapeCode() {
+        Captured result = runMain("--url",
+                "http://paypa1-secure-login.tk/verify?redirect=http://evil.tk/x", "--quiet");
+        assertEquals(-1, result.stdout().indexOf(''));
+    }
+
+    @Test
+    void noColorFlagDoesNotBreakNormalOutput() {
+        Captured result = runMain("--url", "http://paypa1-secure-login.tk/verify", "--no-color");
+        assertEquals(0, result.exitCode());
+        assertEquals(-1, result.stdout().indexOf(''));
+        assertTrue(result.stdout().contains("HIGH") || result.stdout().contains("MEDIUM"));
+    }
+
+    @Test
+    void batchQuietModePrintsOneLinePerUrlNoSummary(@TempDir Path tempDir) throws Exception {
+        Path batchFile = tempDir.resolve("urls.txt");
+        Files.writeString(batchFile, "https://example.com\nhttp://192.168.1.1/login\n", StandardCharsets.UTF_8);
+
+        Captured result = runMain("--batch", batchFile.toString(), "--quiet");
+
+        assertEquals(0, result.exitCode());
+        assertTrue(!result.stdout().contains("Summary"));
+        String[] lines = result.stdout().strip().split("\\r?\\n");
+        assertEquals(2, lines.length);
+    }
 }

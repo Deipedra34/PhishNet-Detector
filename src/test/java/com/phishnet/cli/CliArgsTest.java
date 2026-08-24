@@ -67,4 +67,65 @@ class CliArgsTest {
     void emptyArgsThrows() {
         assertThrows(IllegalArgumentException.class, () -> CliArgs.parse(new String[]{}));
     }
+
+    @Test
+    void parsesVerboseFlag() {
+        CliArgs args = CliArgs.parse(new String[]{"--url", "https://example.com", "--verbose"});
+        assertTrue(args.verbose());
+        assertFalse(args.quiet());
+        assertEquals(OutputLevel.VERBOSE, args.outputLevel());
+    }
+
+    @Test
+    void shortVerboseFlagAlsoWorks() {
+        CliArgs args = CliArgs.parse(new String[]{"--url", "https://example.com", "-v"});
+        assertTrue(args.verbose());
+    }
+
+    @Test
+    void parsesQuietFlag() {
+        CliArgs args = CliArgs.parse(new String[]{"--url", "https://example.com", "--quiet"});
+        assertTrue(args.quiet());
+        assertFalse(args.verbose());
+        assertEquals(OutputLevel.QUIET, args.outputLevel());
+    }
+
+    @Test
+    void shortQuietFlagAlsoWorks() {
+        CliArgs args = CliArgs.parse(new String[]{"--url", "https://example.com", "-q"});
+        assertTrue(args.quiet());
+    }
+
+    @Test
+    void neitherVerboseNorQuietMeansNormalLevel() {
+        CliArgs args = CliArgs.parse(new String[]{"--url", "https://example.com"});
+        assertFalse(args.verbose());
+        assertFalse(args.quiet());
+        assertEquals(OutputLevel.NORMAL, args.outputLevel());
+    }
+
+    @Test
+    void verboseAndQuietTogetherThrows() {
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                () -> CliArgs.parse(new String[]{"--url", "https://example.com", "--verbose", "--quiet"}));
+        assertTrue(e.getMessage().contains("--verbose") && e.getMessage().contains("--quiet"));
+    }
+
+    @Test
+    void shortVerboseAndQuietTogetherThrows() {
+        assertThrows(IllegalArgumentException.class,
+                () -> CliArgs.parse(new String[]{"--url", "https://example.com", "-v", "-q"}));
+    }
+
+    @Test
+    void parsesNoColorFlag() {
+        CliArgs args = CliArgs.parse(new String[]{"--url", "https://example.com", "--no-color"});
+        assertTrue(args.noColor());
+    }
+
+    @Test
+    void noColorDefaultsToFalse() {
+        CliArgs args = CliArgs.parse(new String[]{"--url", "https://example.com"});
+        assertFalse(args.noColor());
+    }
 }
