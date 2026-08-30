@@ -96,12 +96,75 @@ class MainTest {
         assertTrue(result.stdout().trim().startsWith("["));
     }
 
+    // --- picocli-generated help/version ---------------------------------------
+
     @Test
     void helpFlagPrintsUsageAndExitsZero() {
         Captured result = runMain("--help");
         assertEquals(0, result.exitCode());
         assertTrue(result.stdout().contains("Usage:"));
+        assertTrue(result.stdout().contains("phishnet"));
     }
+
+    @Test
+    void shortHelpFlagAlsoWorks() {
+        Captured result = runMain("-h");
+        assertEquals(0, result.exitCode());
+        assertTrue(result.stdout().contains("Usage:"));
+    }
+
+    @Test
+    void helpOutputIsGroupedIntoInputAndOutputSections() {
+        Captured result = runMain("--help");
+        assertTrue(result.stdout().contains("Input options:"));
+        assertTrue(result.stdout().contains("Output options:"));
+        assertTrue(result.stdout().contains("--url"));
+        assertTrue(result.stdout().contains("--email"));
+        assertTrue(result.stdout().contains("--batch"));
+        assertTrue(result.stdout().contains("--json"));
+        assertTrue(result.stdout().contains("--no-color"));
+        assertTrue(result.stdout().contains("--verbose"));
+        assertTrue(result.stdout().contains("--quiet"));
+    }
+
+    @Test
+    void helpOutputIncludesUsageExamples() {
+        Captured result = runMain("--help");
+        assertTrue(result.stdout().contains("phishnet --url https://example.com"));
+        assertTrue(result.stdout().contains("phishnet --email suspicious.eml --verbose"));
+        assertTrue(result.stdout().contains("phishnet --batch urls.txt --json"));
+    }
+
+    @Test
+    void versionFlagPrintsProjectVersionAndExitsZero() {
+        Captured result = runMain("--version");
+        assertEquals(0, result.exitCode());
+        assertTrue(result.stdout().contains("phishnet"));
+        // Must reflect the actual Maven build version (read from the filtered
+        // version.properties resource), not a hand-typed, driftable literal.
+        String pomVersion = readPomVersion();
+        assertTrue(result.stdout().contains(pomVersion),
+                "expected version output to contain '" + pomVersion + "' but was: " + result.stdout());
+    }
+
+    @Test
+    void shortVersionFlagAlsoWorks() {
+        Captured result = runMain("-V");
+        assertEquals(0, result.exitCode());
+        assertTrue(result.stdout().contains("phishnet"));
+    }
+
+    private static String readPomVersion() {
+        try (java.io.InputStream in = MainTest.class.getResourceAsStream("/version.properties")) {
+            java.util.Properties props = new java.util.Properties();
+            props.load(in);
+            return props.getProperty("version");
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    // --- usage errors -----------------------------------------------------------
 
     @Test
     void noModeFlagPrintsErrorAndUsage() {
@@ -112,10 +175,17 @@ class MainTest {
     }
 
     @Test
+    void multipleModeFlagsAreRejected() {
+        Captured result = runMain("--url", "https://example.com", "--email", "x.eml");
+        assertEquals(2, result.exitCode());
+        assertTrue(result.stderr().contains("Error"));
+    }
+
+    @Test
     void unknownFlagIsRejected() {
         Captured result = runMain("--nope");
         assertEquals(2, result.exitCode());
-        assertTrue(result.stderr().contains("Unknown argument"));
+        assertTrue(result.stderr().contains("Unknown option"));
     }
 
     @Test
@@ -204,6 +274,14 @@ class MainTest {
         assertEquals(2, result.exitCode());
         assertTrue(result.stderr().contains("--verbose"));
         assertTrue(result.stderr().contains("--quiet"));
+        assertTrue(result.stderr().contains("mutually exclusive"));
+    }
+
+    @Test
+    void shortVerboseAndQuietTogetherIsUsageError() {
+        Captured result = runMain("--url", "https://example.com", "-v", "-q");
+        assertEquals(2, result.exitCode());
+        assertTrue(result.stderr().contains("mutually exclusive"));
     }
 
     @Test

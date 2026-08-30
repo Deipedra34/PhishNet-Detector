@@ -22,6 +22,7 @@ keywords, and scoring weights - lives in a YAML config file, not in the code.
 - [Configuration](#configuration)
 - [Testing](#testing)
 - [Project layout](#project-layout)
+- [Contributing](#contributing)
 - [License](#license)
 
 ## What it detects
@@ -72,7 +73,7 @@ flowchart LR
     end
 
     subgraph CLI
-        M["Main / CliArgs"]
+        M["Main (picocli @Command)"]
         RF["ReportFormatter (--json)"]
         RP["Reporter (text, --verbose/--quiet, color)"]
     end
@@ -146,6 +147,67 @@ mvn clean package
 This produces a runnable, dependency-bundled jar at `target/phishnet.jar`.
 
 ## Usage
+
+The CLI is built on [picocli](https://picocli.info), which generates `--help`
+and `--version` output directly from the `@Command`/`@Option` annotations on
+[`Main`](src/main/java/com/phishnet/cli/Main.java) - so this is always exactly
+what you get by running it yourself:
+
+```
+$ java -jar target/phishnet.jar --help
+Usage:
+phishnet [-hV] [--config=<path>] (--url=<url> | --email=<file.eml> |
+         --batch=<file>) [[--json] [--no-color]] [-v | -q]
+
+Analyzes URLs, TLS certificates, and .eml email files for phishing indicators,
+and combines whatever it finds into a single 0-100 risk score with a
+Low/Medium/High label and a plain-language recommendation.
+
+Options:
+      --config=<path>      Use a custom YAML config instead of the bundled
+                             default
+  -h, --help               Show this help message and exit.
+  -V, --version            Print version information and exit.
+
+Input options:
+      --url=<url>          Analyze a single URL
+      --email=<file.eml>   Analyze a single .eml email file
+      --batch=<file>       Analyze a newline-separated file of URLs ('#'
+                             comments allowed)
+
+Output options:
+      --json               Output machine-readable JSON instead of a
+                             human-readable report
+      --no-color           Disable ANSI colors even if the terminal supports
+                             them
+
+  -v, --verbose            Show each analyzer's internal reasoning, not just
+                             the summary
+  -q, --quiet              Print one machine-parsable line only (LEVEL SCORE
+                             TARGET); exit code reflects risk
+
+Examples:
+  phishnet --url https://example.com
+  phishnet --email suspicious.eml --verbose
+  phishnet --batch urls.txt --json
+
+See the project README for the full option reference and sample output.
+```
+
+```
+$ java -jar target/phishnet.jar --version
+phishnet 1.0.0
+```
+
+`--version` always reflects the version actually built (Maven filters it into
+`version.properties` at build time from the `pom.xml` `<version>`), so it can
+never drift out of sync with a release.
+
+Exit codes: `0` for a completed LOW/MEDIUM-risk (or non-quiet) run, `1` for a
+completed HIGH-risk run in `--quiet` mode or an I/O error (missing file,
+unreadable config), and picocli's own usage-error code (`2`) for bad
+arguments - an unknown flag, a missing required value, no (or more than one)
+of `--url`/`--email`/`--batch`, or passing both `--verbose` and `--quiet`.
 
 ```bash
 # Analyze a single URL
@@ -275,13 +337,51 @@ src/main/java/com/phishnet/
   analyzer/   UrlAnalyzer, SslChecker, EmailAnalyzer
   model/      Signal, RiskScore, UrlComponents, PhishNetConfig, ...
   scoring/    RiskScorer
-  cli/        Main, CliArgs, ReportFormatter, Reporter, OutputLevel
+  cli/        Main (picocli @Command), ReportFormatter, Reporter, OutputLevel
   util/       LevenshteinDistance, HomoglyphUtil, ConfigLoader, AnsiColor, ColorSupport
 src/main/resources/phishnet-config.yaml
+src/main/resources/version.properties  (Maven-filtered; feeds --version, see Contributing)
 src/test/java/...            (mirrors the layout above)
 src/test/resources/urls/     phishing_urls.txt, legitimate_urls.txt
 src/test/resources/emails/   .eml fixtures (phishing and legitimate)
 ```
+
+## Contributing
+
+The CLI's argument parsing lives entirely in
+[`Main`](src/main/java/com/phishnet/cli/Main.java) as
+[picocli](https://picocli.info) `@Command`/`@Option`/`@ArgGroup` annotations -
+there's no hand-rolled parsing to touch. To add a new flag:
+
+1. Add a `@Option`-annotated field (or a `@Parameters` field for a positional
+   argument) to `Main`, or to one of its nested option-holder classes
+   (`ModeOptions`, `OutputOptions`, `VerbosityOptions`) if it belongs with an
+   existing group. Give it a clear `description` - that text becomes the
+   `--help` line, and requirement 4/6 in this repo's own history is "the help
+   output should stay well-organized," so group new flags with the section
+   they logically belong to (input/output/misc) rather than leaving them to
+   fall into the default `Options:` bucket.
+2. If the new flag must not be combined with an existing one (like
+   `--verbose`/`--quiet`), use an `@ArgGroup` with `exclusive = true` rather
+   than a manual `if` check - see the existing groups for the pattern, and
+   note the caveat in the comment above the `mode` field about required
+   groups needing to live at the top level, not nested inside an optional one.
+3. Read the new field in `Main.call()` and wire it into the existing
+   `runUrl`/`runEmail`/`runBatch` flow (or add a new one, following the same
+   shape: take a `PrintStream`, return an exit code, never call
+   `System.exit`).
+4. Add a test in `MainTest` that drives it through `Main.run(args, out, err)`
+   (which internally goes through picocli's `CommandLine#execute`) and
+   asserts on the exit code and captured output - not a subprocess test.
+5. Re-paste the `--help` output in this README's Usage section (`java -jar
+   target/phishnet.jar --help`) so it stays in sync with what `Main` actually
+   generates.
+
+The `--version` string is never hand-typed: it's read at runtime from
+`src/main/resources/version.properties`, which Maven filters at build time
+(see the `<resources>` block in `pom.xml`) to substitute the real
+`${project.version}` from `pom.xml`. Bump the version in one place (the
+`pom.xml` `<version>`) and `--version` follows automatically.
 
 ## License
 
