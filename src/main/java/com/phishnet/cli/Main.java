@@ -120,6 +120,27 @@ public final class Main implements Callable<Integer> {
         private boolean quiet;
     }
 
+    // --- history options ----------------------------------------------------
+
+    // Scan history logging is a side effect of scanning, independent of the output
+    // options above - a --json or --quiet run still appends its rows. Kept in a
+    // non-exclusive group only so the two flags get their own labeled --help section.
+    @ArgGroup(exclusive = false, multiplicity = "0..1", heading = "%nHistory options:%n")
+    private HistoryOptions history = new HistoryOptions();
+
+    private static final class HistoryOptions {
+        @Option(names = "--history-file", paramLabel = "<path>",
+                description = "Append scan results to this CSV file (default: ./phishnet-history.csv)")
+        private String file;
+
+        @Option(names = "--no-history",
+                description = "Do not append this run's results to the scan history CSV")
+        private boolean disabled;
+    }
+
+    /** Default scan-history CSV, relative to the current working directory. */
+    private static final Path DEFAULT_HISTORY_FILE = Path.of("phishnet-history.csv");
+
     // -h/--help and -V/--version are handled automatically via mixinStandardHelpOptions.
 
     private PrintStream out;
@@ -192,13 +213,18 @@ public final class Main implements Callable<Integer> {
         boolean colorEnabled = ColorSupport.isEnabled(output.noColor);
         Reporter reporter = new Reporter(out, level, colorEnabled);
 
+        Path historyFile = history.file != null ? Path.of(history.file) : DEFAULT_HISTORY_FILE;
+        HistoryWriter historyWriter = new HistoryWriter(historyFile, !history.disabled, err);
+
         try {
             if (mode.url != null) {
-                return runUrl(mode.url, urlAnalyzer, scorer, formatter, reporter, output.json, out);
+                return runUrl(mode.url, urlAnalyzer, scorer, formatter, reporter, historyWriter, output.json, out);
             } else if (mode.emailPath != null) {
-                return runEmail(mode.emailPath, emailAnalyzer, scorer, formatter, reporter, output.json, out);
+                return runEmail(mode.emailPath, emailAnalyzer, scorer, formatter, reporter, historyWriter,
+                        output.json, out);
             } else {
-                return runBatch(mode.batchPath, urlAnalyzer, scorer, formatter, reporter, output.json, out);
+                return runBatch(mode.batchPath, urlAnalyzer, scorer, formatter, reporter, historyWriter,
+                        output.json, out);
             }
         } catch (IOException e) {
             err.println("Error: " + e.getMessage());
@@ -215,9 +241,10 @@ public final class Main implements Callable<Integer> {
     }
 
     private static int runUrl(String url, UrlAnalyzer urlAnalyzer, RiskScorer scorer, ReportFormatter formatter,
-                               Reporter reporter, boolean json, PrintStream out) {
+                               Reporter reporter, HistoryWriter historyWriter, boolean json, PrintStream out) {
         UrlAnalysisResult result = urlAnalyzer.analyze(url);
         RiskScore score = scorer.score(result.signals());
+        historyWriter.record(url, HistoryWriter.TargetType.URL, score);
         if (json) {
             out.println(formatter.json(url, score));
             return 0;
@@ -227,11 +254,12 @@ public final class Main implements Callable<Integer> {
     }
 
     private static int runEmail(String emailPath, EmailAnalyzer emailAnalyzer, RiskScorer scorer,
-                                 ReportFormatter formatter, Reporter reporter, boolean json,
-                                 PrintStream out) throws IOException {
+                                 ReportFormatter formatter, Reporter reporter, HistoryWriter historyWriter,
+                                 boolean json, PrintStream out) throws IOException {
         try (InputStream in = Files.newInputStream(Path.of(emailPath))) {
             EmailAnalysisResult result = emailAnalyzer.analyze(in);
             RiskScore score = scorer.score(result.allSignals());
+            historyWriter.record(emailPath, HistoryWriter.TargetType.EMAIL, score);
             if (json) {
                 String label = emailPath + " (from: " + result.senderAddress()
                         + ", subject: \"" + result.subject() + "\")";
@@ -244,8 +272,8 @@ public final class Main implements Callable<Integer> {
     }
 
     private static int runBatch(String batchPath, UrlAnalyzer urlAnalyzer, RiskScorer scorer,
-                                 ReportFormatter formatter, Reporter reporter, boolean json,
-                                 PrintStream out) throws IOException {
+                                 ReportFormatter formatter, Reporter reporter, HistoryWriter historyWriter,
+                                 boolean json, PrintStream out) throws IOException {
         List<String> lines = Files.readAllLines(Path.of(batchPath));
         List<AnalysisEntry> entries = new ArrayList<>();
         for (String line : lines) {
@@ -254,7 +282,10 @@ public final class Main implements Callable<Integer> {
                 continue;
             }
             UrlAnalysisResult result = urlAnalyzer.analyze(url);
-            entries.add(new AnalysisEntry(url, scorer.score(result.signals())));
+            RiskScore score = scorer.score(result.signals());
+            // Written per item, inside the scan loop, so an interrupted batch still leaves partial history.
+            historyWriter.record(url, HistoryWriter.TargetType.URL, score);
+            entries.add(new AnalysisEntry(url, score));
         }
 
         if (json) {

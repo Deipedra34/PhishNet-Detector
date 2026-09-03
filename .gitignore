@@ -22,6 +22,9 @@ desktop.ini
 # Logs
 *.log
 
+# Runtime artifacts
+phishnet-history.csv
+
 # Maven
 .mvn/wrapper/maven-wrapper.jar
 

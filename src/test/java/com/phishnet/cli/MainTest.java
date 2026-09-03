@@ -8,8 +8,11 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MainTest {
@@ -18,11 +21,24 @@ class MainTest {
     }
 
     private static Captured runMain(String... args) {
+        // Scan-history logging is a side effect of every scan and defaults to
+        // ./phishnet-history.csv in the working directory. Unless a test is
+        // explicitly exercising history, suppress it so the suite never writes
+        // into the real module directory. Tests that pass their own
+        // --history-file / --no-history are left untouched.
+        String[] effectiveArgs = args;
+        boolean touchesHistory = Arrays.stream(args)
+                .anyMatch(a -> a.equals("--history-file") || a.equals("--no-history"));
+        if (!touchesHistory) {
+            effectiveArgs = Arrays.copyOf(args, args.length + 1);
+            effectiveArgs[args.length] = "--no-history";
+        }
+
         ByteArrayOutputStream outBytes = new ByteArrayOutputStream();
         ByteArrayOutputStream errBytes = new ByteArrayOutputStream();
         try (PrintStream out = new PrintStream(outBytes, true, StandardCharsets.UTF_8);
              PrintStream err = new PrintStream(errBytes, true, StandardCharsets.UTF_8)) {
-            int code = Main.run(args, out, err);
+            int code = Main.run(effectiveArgs, out, err);
             out.flush();
             err.flush();
             return new Captured(code, outBytes.toString(StandardCharsets.UTF_8),
@@ -125,6 +141,8 @@ class MainTest {
         assertTrue(result.stdout().contains("--no-color"));
         assertTrue(result.stdout().contains("--verbose"));
         assertTrue(result.stdout().contains("--quiet"));
+        assertTrue(result.stdout().contains("--history-file"));
+        assertTrue(result.stdout().contains("--no-history"));
     }
 
     @Test
@@ -310,5 +328,102 @@ class MainTest {
         assertTrue(!result.stdout().contains("Summary"));
         String[] lines = result.stdout().strip().split("\\r?\\n");
         assertEquals(2, lines.length);
+    }
+
+    // --- scan history logging ------------------------------------------------
+
+    @Test
+    void historyFileOptionRecordsOneRowPerScan(@TempDir Path tempDir) throws Exception {
+        Path historyFile = tempDir.resolve("phishnet-history.csv");
+
+        Captured first = runMain("--url", "https://example.com", "--history-file", historyFile.toString());
+        assertEquals(0, first.exitCode());
+
+        List<String> lines = Files.readAllLines(historyFile, StandardCharsets.UTF_8);
+        assertEquals(2, lines.size());
+        assertEquals("timestamp,target,type,risk_score,risk_label,signals", lines.get(0));
+        assertTrue(lines.get(1).contains(",https://example.com,URL,"));
+
+        // A second run appends without rewriting the header.
+        runMain("--url", "http://192.168.1.1/login", "--history-file", historyFile.toString());
+        lines = Files.readAllLines(historyFile, StandardCharsets.UTF_8);
+        assertEquals(3, lines.size());
+        assertTrue(lines.get(2).contains(",http://192.168.1.1/login,URL,"));
+        assertTrue(lines.get(2).contains("ipAddressHost"));
+    }
+
+    @Test
+    void historyIsLoggedEvenInJsonMode(@TempDir Path tempDir) throws Exception {
+        Path historyFile = tempDir.resolve("history.csv");
+
+        Captured result = runMain("--url", "https://bit.ly/xyz", "--json", "--history-file", historyFile.toString());
+
+        assertEquals(0, result.exitCode());
+        assertTrue(result.stdout().trim().startsWith("{"));
+        List<String> lines = Files.readAllLines(historyFile, StandardCharsets.UTF_8);
+        assertEquals(2, lines.size());
+        assertTrue(lines.get(1).contains("urlShortener"));
+    }
+
+    @Test
+    void noHistoryFlagDisablesLogging(@TempDir Path tempDir) {
+        Path historyFile = tempDir.resolve("phishnet-history.csv");
+
+        Captured result = runMain("--url", "https://example.com",
+                "--history-file", historyFile.toString(), "--no-history");
+
+        assertEquals(0, result.exitCode());
+        assertFalse(Files.exists(historyFile));
+    }
+
+    @Test
+    void batchModeWritesOneHistoryRowPerItem(@TempDir Path tempDir) throws Exception {
+        Path batchFile = tempDir.resolve("urls.txt");
+        Files.writeString(batchFile,
+                "# comment\nhttps://example.com\n\nhttp://192.168.1.1/login\nhttp://free-prize.tk\n",
+                StandardCharsets.UTF_8);
+        Path historyFile = tempDir.resolve("phishnet-history.csv");
+
+        Captured result = runMain("--batch", batchFile.toString(), "--history-file", historyFile.toString());
+
+        assertEquals(0, result.exitCode());
+        List<String> lines = Files.readAllLines(historyFile, StandardCharsets.UTF_8);
+        assertEquals(4, lines.size()); // header + 3 non-comment URLs
+        assertTrue(lines.get(1).contains(",https://example.com,URL,"));
+        assertTrue(lines.get(2).contains(",http://192.168.1.1/login,URL,"));
+        assertTrue(lines.get(3).contains(",http://free-prize.tk,URL,"));
+    }
+
+    @Test
+    void emailScanIsRecordedWithEmailType(@TempDir Path tempDir) throws Exception {
+        Path emlFile = tempDir.resolve("phish.eml");
+        Files.writeString(emlFile,
+                "From: \"PayPal\" <alert@random-mailer.info>\n"
+                        + "To: victim@example.com\n"
+                        + "Subject: Verify immediately\n"
+                        + "Content-Type: text/plain; charset=UTF-8\n\n"
+                        + "Your account will be suspended. Verify immediately: http://192.168.1.1/login\n",
+                StandardCharsets.UTF_8);
+        Path historyFile = tempDir.resolve("phishnet-history.csv");
+
+        Captured result = runMain("--email", emlFile.toString(), "--history-file", historyFile.toString());
+
+        assertEquals(0, result.exitCode());
+        List<String> lines = Files.readAllLines(historyFile, StandardCharsets.UTF_8);
+        assertEquals(2, lines.size());
+        assertTrue(lines.get(1).contains("," + emlFile + ",EMAIL,"));
+    }
+
+    @Test
+    void historyWriteFailureWarnsButDoesNotFailScan(@TempDir Path tempDir) {
+        // An existing directory can't be opened as a file for writing.
+        Path historyDir = tempDir.resolve("history-as-dir");
+        assertTrue(historyDir.toFile().mkdir());
+
+        Captured result = runMain("--url", "https://example.com", "--history-file", historyDir.toString());
+
+        assertEquals(0, result.exitCode());
+        assertTrue(result.stdout().contains("Risk Score"));
+        assertTrue(result.stderr().contains("could not write scan history"));
     }
 }

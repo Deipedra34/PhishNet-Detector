@@ -158,6 +158,7 @@ $ java -jar target/phishnet.jar --help
 Usage:
 phishnet [-hV] [--config=<path>] (--url=<url> | --email=<file.eml> |
          --batch=<file>) [[--json] [--no-color]] [-v | -q]
+         [[--history-file=<path>] [--no-history]]
 
 Analyzes URLs, TLS certificates, and .eml email files for phishing indicators,
 and combines whatever it finds into a single 0-100 risk score with a
@@ -185,6 +186,13 @@ Output options:
                              the summary
   -q, --quiet              Print one machine-parsable line only (LEVEL SCORE
                              TARGET); exit code reflects risk
+
+History options:
+      --history-file=<path>
+                           Append scan results to this CSV file (default: .
+                             /phishnet-history.csv)
+      --no-history         Do not append this run's results to the scan history
+                             CSV
 
 Examples:
   phishnet --url https://example.com
@@ -234,6 +242,12 @@ java -jar target/phishnet.jar --url "https://example.com" --no-color
 
 # Use a custom config instead of the bundled defaults
 java -jar target/phishnet.jar --url "https://example.com" --config my-config.yaml
+
+# Write scan history somewhere other than ./phishnet-history.csv
+java -jar target/phishnet.jar --url "https://example.com" --history-file ~/phishnet-scans.csv
+
+# Don't record this run in the scan history at all
+java -jar target/phishnet.jar --url "https://example.com" --no-history
 ```
 
 Output is colored automatically when stdout is a real terminal (HIGH=red, MEDIUM=yellow, LOW=green,
@@ -241,6 +255,40 @@ bold labels, ⚠/✓/✗ symbols). Colors are skipped automatically when output 
 a file, and can be turned off explicitly with `--no-color` or by setting the `NO_COLOR` environment
 variable ([no-color.org](https://no-color.org/)). `--quiet` output never includes color, since it's
 meant to be machine-parsable.
+
+### Scan history
+
+Every scan appends one row to a CSV history file as a side effect - single
+`--url`, single `--email`, and each item of a `--batch` run (written
+incrementally, one row per item, so an interrupted batch still leaves partial
+history). This happens regardless of `--verbose`/`--quiet`/`--json` mode.
+
+- Default location: `./phishnet-history.csv`, relative to the current working
+  directory. Override it with `--history-file <path>`.
+- `--no-history` disables logging for that run.
+- The file is created with a header row on first use; later runs append without
+  rewriting the header.
+- If the history file can't be written (permissions, disk full, ...), a warning
+  is printed to stderr and the scan still completes normally.
+
+Columns (RFC 4180 quoting, so targets containing commas or quotes stay in one
+field):
+
+| Column | Meaning |
+| --- | --- |
+| `timestamp` | ISO-8601 instant when the scan was recorded (UTC, e.g. `2026-09-03T19:03:41.036Z`) |
+| `target` | the analyzed URL, or the `.eml` file path |
+| `type` | `URL` or `EMAIL` |
+| `risk_score` | 0-100 integer |
+| `risk_label` | `LOW`, `MEDIUM`, or `HIGH` |
+| `signals` | semicolon-separated list of the triggered signal ids (empty if none) |
+
+```
+$ cat phishnet-history.csv
+timestamp,target,type,risk_score,risk_label,signals
+2026-09-03T19:03:41.036Z,http://paypa1-secure-login.tk/verify?redirect=http://evil.tk/x,URL,70,HIGH,suspiciousTld;typosquatting;nestedRedirect
+2026-09-03T19:03:41.425Z,"https://example.com/path?x=1,2",URL,0,LOW,
+```
 
 ### Sample output
 
@@ -337,7 +385,7 @@ src/main/java/com/phishnet/
   analyzer/   UrlAnalyzer, SslChecker, EmailAnalyzer
   model/      Signal, RiskScore, UrlComponents, PhishNetConfig, ...
   scoring/    RiskScorer
-  cli/        Main (picocli @Command), ReportFormatter, Reporter, OutputLevel
+  cli/        Main (picocli @Command), ReportFormatter, Reporter, OutputLevel, HistoryWriter
   util/       LevenshteinDistance, HomoglyphUtil, ConfigLoader, AnsiColor, ColorSupport
 src/main/resources/phishnet-config.yaml
 src/main/resources/version.properties  (Maven-filtered; feeds --version, see Contributing)
