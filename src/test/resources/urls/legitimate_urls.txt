@@ -10,3 +10,6 @@ https://github.com/anthropics
 https://www.wikipedia.org/wiki/Phishing
 https://www.dropbox.com/login
 https://www.linkedin.com/feed/
+https://www.coinbase.com/signin
+https://www.turkcell.com.tr/
+https://secure.chase.com/web/auth/dashboard

@@ -366,6 +366,24 @@ scoring:
   encodedCharThreshold: 5
 ```
 
+The bundled config ships with **71 brands** (banking/finance, tech/email,
+crypto exchanges, shipping/delivery, Turkish services, and retail) and
+**27 suspicious TLDs**. Both lists are plain YAML sequences, so growing
+them is a one-line edit - no recompile needed:
+
+```yaml
+brands:
+  - paypal
+  - your-new-brand-here
+```
+
+The TLD list reflects free/cheap-to-register TLDs with historically high
+spam/phishing abuse rates per public reporting (e.g. Spamhaus's TLD abuse
+statistics). It's a heuristic signal, not a hard rule - legitimate sites
+can and do use these TLDs, so a `suspiciousTld` match only ever contributes
+its configured partial weight to the score (`scoring.weights.suspiciousTld`)
+and never triggers a HIGH verdict by itself.
+
 ## Testing
 
 ```bash

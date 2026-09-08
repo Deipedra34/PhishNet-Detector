@@ -5,38 +5,130 @@
 # added to a signal's total contribution to the 0-100 risk score; thresholds
 # define where the Low/Medium/High bands start.
 
+# Brands checked for typosquatting/combosquatting/homograph impersonation
+# (edit-distance and substring matching against the domain - see
+# UrlAnalyzer#detectTyposquatting / #detectHomograph). Grouped by category
+# and alphabetized within each group purely for readability; order has no
+# effect on matching. Add more here any time - no code changes needed.
 brands:
-  - google
-  - paypal
-  - apple
-  - microsoft
-  - amazon
-  - facebook
-  - netflix
-  - instagram
+  # Banking / finance
+  - americanexpress
   - bankofamerica
+  - barclays
+  - capitalone
   - chase
+  - citibank
+  - hsbc
+  - revolut
+  - santander
+  - stripe
+  - tdbank
+  - usbank
+  - venmo
   - wellsfargo
-  - dhl
-  - fedex
-  - linkedin
-  - dropbox
+  - westernunion
+  - wise
 
+  # Tech / email / social
+  - adobe
+  - amazon
+  - apple
+  - discord
+  - dropbox
+  - facebook
+  - github
+  - google
+  - icloud
+  - instagram
+  - linkedin
+  - microsoft
+  - netflix
+  - outlook
+  - paypal
+  - pinterest
+  - snapchat
+  - spotify
+  - tiktok
+  - twitter
+  - whatsapp
+  - yahoo
+  - zoom
+
+  # Crypto / exchanges
+  - binance
+  - bitpay
+  - blockchain
+  - coinbase
+  - gemini
+  - kraken
+  - metamask
+
+  # Shipping / delivery
+  - dhl
+  - dpd
+  - fedex
+  - royalmail
+  - ups
+  - usps
+
+  # Turkish services (frequent phishing targets for Turkish users)
+  - akbank
+  - denizbank
+  - garanti
+  - getir
+  - halkbank
+  - hepsiburada
+  - isbank
+  - trendyol
+  - turkcell
+  - turkishairlines
+  - vakifbank
+  - yemeksepeti
+  - ziraatbankasi
+
+  # Retail
+  - bestbuy
+  - costco
+  - ebay
+  - homedepot
+  - target
+  - walmart
+
+# TLDs with historically high spam/phishing abuse rates, per public reporting
+# such as Spamhaus's TLD abuse statistics (many are free or very cheap to
+# register, which draws high-volume throwaway phishing use). This is a
+# heuristic signal only, not a hard rule - plenty of legitimate sites use
+# these TLDs too, so a suspiciousTld match should only ever contribute
+# partial weight to the total score (see scoring.weights.suspiciousTld
+# below), never an automatic HIGH verdict on its own.
 suspiciousTlds:
-  - tk
-  - ml
-  - ga
+  - accountant
+  - bid
   - cf
-  - gq
-  - xyz
-  - top
-  - work
   - click
+  - club
   - country
+  - download
+  - ga
+  - gdn
+  - gq
+  - kim
   - link
-  - support
-  - zip
+  - loan
+  - men
+  - ml
+  - party
+  - rest
   - review
+  - science
+  - stream
+  - support
+  - tk
+  - top
+  - win
+  - work
+  - xyz
+  - zip
 
 urlShorteners:
   - bit.ly

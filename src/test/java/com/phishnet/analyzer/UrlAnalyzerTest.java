@@ -93,6 +93,18 @@ class UrlAnalyzerTest {
         assertFalse(ids(result).contains("suspiciousTld"));
     }
 
+    @Test
+    void dotTopTldIsFlagged() {
+        UrlAnalysisResult result = analyzer.analyze("http://free-prize-claim.top/winner");
+        assertTrue(ids(result).contains("suspiciousTld"));
+    }
+
+    @Test
+    void dotLoanTldIsFlagged() {
+        UrlAnalysisResult result = analyzer.analyze("http://instant-approval.loan/apply");
+        assertTrue(ids(result).contains("suspiciousTld"));
+    }
+
     // --- URL shorteners ---------------------------------------------------
 
     @Test
@@ -137,6 +149,25 @@ class UrlAnalyzerTest {
     void unrelatedDomainIsNotFlaggedAsTyposquatting() {
         UrlAnalysisResult result = analyzer.analyze("https://some-random-blog.com/post/1");
         assertFalse(ids(result).contains("typosquatting"));
+    }
+
+    @Test
+    void combosquattingWithDigitSubstitutionOnExpandedBrandIsFlagged() {
+        // "amaz0n" (zero for 'o') is edit distance 1 from the "amazon" brand entry.
+        UrlAnalysisResult result = analyzer.analyze("http://amaz0n-support.xyz/verify");
+        assertTrue(ids(result).contains("typosquatting"));
+    }
+
+    @Test
+    void turkishBankBrandCombosquattingIsFlagged() {
+        UrlAnalysisResult result = analyzer.analyze("http://garanti-guvenlik-girisi.com/login");
+        assertTrue(ids(result).contains("typosquatting"));
+    }
+
+    @Test
+    void cryptoExchangeBrandCombosquattingIsFlagged() {
+        UrlAnalysisResult result = analyzer.analyze("http://coinbase-wallet-verify.com/login");
+        assertTrue(ids(result).contains("typosquatting"));
     }
 
     // --- homograph / punycode -------------------------------------------------
