@@ -8,13 +8,16 @@ import com.phishnet.util.ConfigLoader;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTimeout;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class UrlAnalyzerTest {
@@ -282,6 +285,73 @@ class UrlAnalyzerTest {
         String host = "xn--80ak6aa92e.com"; // valid punycode, arbitrary Cyrillic content
         UrlAnalysisResult result = analyzer.analyze("http://" + host + "/");
         assertTrue(ids(result).contains("homograph"));
+    }
+
+    // --- extremely long URLs -------------------------------------------------
+
+    @Test
+    void severalThousandCharacterUrlIsHandledQuicklyAndFlaggedAsLong() {
+        String hugePath = "a".repeat(5000);
+        String url = "https://example.com/" + hugePath;
+
+        UrlAnalysisResult result = assertTimeout(Duration.ofSeconds(2),
+                () -> analyzer.analyze(url), "analysis of a 5000+ char URL should not have a performance cliff");
+
+        assertTrue(ids(result).contains("longOrObfuscatedUrl"));
+        assertEquals(url.length(), result.components().rawUrl().length());
+    }
+
+    @Test
+    void extremelyLongUrlWithManySignalsDoesNotThrow() {
+        StringBuilder url = new StringBuilder("http://paypa1-secure-login.tk/verify?");
+        for (int i = 0; i < 2000; i++) {
+            url.append("p").append(i).append("=").append("v".repeat(10)).append("&");
+        }
+        UrlAnalysisResult result = assertDoesNotThrow(() -> analyzer.analyze(url.toString()));
+        assertTrue(ids(result).contains("longOrObfuscatedUrl"));
+        assertTrue(ids(result).contains("excessiveQueryParams"));
+    }
+
+    // --- malformed URLs -----------------------------------------------------
+
+    @Test
+    void spaceInHostIsMalformedNotThrown() {
+        UrlAnalysisResult result = assertDoesNotThrow(() -> analyzer.analyze("http://exa mple.com/foo"));
+        assertTrue(ids(result).contains("malformedUrl"));
+    }
+
+    @Test
+    void schemeWithEmptyAuthorityIsMalformedNotThrown() {
+        UrlAnalysisResult result = assertDoesNotThrow(() -> analyzer.analyze("http:///justapath"));
+        assertTrue(ids(result).contains("malformedUrl"));
+    }
+
+    @Test
+    void onlySpecialCharactersInputIsMalformedNotThrown() {
+        UrlAnalysisResult result = assertDoesNotThrow(() -> analyzer.analyze("!!!@@@###"));
+        assertTrue(ids(result).contains("malformedUrl"));
+    }
+
+    @Test
+    void multipleSchemeSeparatorsDoesNotThrow() {
+        // "://" appearing more than once in one string - not valid usage, but must degrade
+        // to a safe parse (or a malformedUrl signal) rather than an unhandled exception.
+        UrlAnalysisResult result = assertDoesNotThrow(
+                () -> analyzer.analyze("http://evil.com://phish.com/login"));
+        assertEquals("evil.com", result.components().host());
+    }
+
+    @Test
+    void trailingGarbageAfterUrlDoesNotThrow() {
+        assertDoesNotThrow(() -> analyzer.analyze("https://example.com/path<<<>>>garbage"));
+    }
+
+    // --- whitespace-only / special-character-only input ----------------------
+
+    @Test
+    void tabsAndNewlinesOnlyIsFlaggedAsMalformed() {
+        UrlAnalysisResult result = analyzer.analyze("\t\n  \n\t");
+        assertTrue(ids(result).contains("malformedUrl"));
     }
 
     // --- custom config injection --------------------------------------------

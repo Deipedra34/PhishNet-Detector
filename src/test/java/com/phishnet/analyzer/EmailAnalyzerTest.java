@@ -140,4 +140,45 @@ class EmailAnalyzerTest {
             assertTrue(result.linkResults().isEmpty());
         }
     }
+
+    // --- malformed MIME structure --------------------------------------------
+
+    @Test
+    void multipartContentTypeWithoutBoundaryDoesNotThrow() {
+        String eml = "From: attacker@evil.com\n"
+                + "Subject: Broken multipart\n"
+                + "Content-Type: multipart/mixed\n\n"
+                + "This claims to be multipart but has no boundary parameter or parts.\n";
+        InputStream in = new ByteArrayInputStream(eml.getBytes(StandardCharsets.UTF_8));
+
+        EmailAnalysisResult result = analyzer.analyze(in);
+
+        assertEquals("attacker@evil.com", result.senderAddress());
+        assertTrue(result.linkResults().isEmpty());
+    }
+
+    @Test
+    void headersOnlyWithNoBodyDoesNotThrow() {
+        String eml = "From: alice@example.com\n"
+                + "Subject: Just headers\n"
+                + "Content-Type: text/plain; charset=UTF-8\n\n";
+        InputStream in = new ByteArrayInputStream(eml.getBytes(StandardCharsets.UTF_8));
+
+        EmailAnalysisResult result = analyzer.analyze(in);
+
+        assertEquals("alice@example.com", result.senderAddress());
+        assertEquals("Just headers", result.subject());
+        assertTrue(result.linkResults().isEmpty());
+        assertTrue(result.signals().isEmpty());
+    }
+
+    @Test
+    void whitespaceOnlyStreamDoesNotThrow() {
+        InputStream in = new ByteArrayInputStream("   \n\t\n  ".getBytes(StandardCharsets.UTF_8));
+
+        EmailAnalysisResult result = analyzer.analyze(in);
+
+        assertEquals("", result.senderAddress());
+        assertTrue(result.linkResults().isEmpty());
+    }
 }

@@ -113,6 +113,42 @@ class RiskScorerTest {
     }
 
     @Test
+    void oneBelowHighThresholdIsMedium() {
+        RiskScorer scorer = new RiskScorer(configWithWeights(Map.of("typosquatting", 59), 30, 60));
+        RiskScore result = scorer.score(List.of(new Signal("typosquatting", SignalCategory.URL, "typo")));
+
+        assertEquals(59, result.score());
+        assertEquals(RiskLevel.MEDIUM, result.level());
+    }
+
+    @Test
+    void scoreOneAboveMediumThresholdIsMedium() {
+        RiskScorer scorer = new RiskScorer(configWithWeights(Map.of("suspiciousTld", 31), 30, 60));
+        RiskScore result = scorer.score(List.of(new Signal("suspiciousTld", SignalCategory.URL, "tld")));
+
+        assertEquals(RiskLevel.MEDIUM, result.level());
+    }
+
+    @Test
+    void negativeConfiguredWeightClampsScoreToZeroNotBelow() {
+        RiskScorer scorer = new RiskScorer(configWithWeights(Map.of("someSignal", -50), 30, 60));
+        RiskScore result = scorer.score(List.of(new Signal("someSignal", SignalCategory.URL, "x")));
+
+        assertEquals(0, result.score());
+        assertEquals(RiskLevel.LOW, result.level());
+    }
+
+    @Test
+    void emptySignalListOnZeroThresholdsIsStillHandled() {
+        // Degenerate config where even zero signals clears the (0) medium threshold.
+        RiskScorer scorer = new RiskScorer(configWithWeights(Map.of(), 0, 60));
+        RiskScore result = scorer.score(List.of());
+
+        assertEquals(0, result.score());
+        assertEquals(RiskLevel.MEDIUM, result.level());
+    }
+
+    @Test
     void recommendationTextDiffersByLevel() {
         RiskScorer scorer = new RiskScorer(configWithWeights(Map.of("homograph", 60), 30, 60));
         RiskScore high = scorer.score(List.of(new Signal("homograph", SignalCategory.URL, "x")));

@@ -393,8 +393,22 @@ mvn test
 JUnit 5 tests cover every module (parsing edge cases, internationalized
 domain names, malformed/empty input, missing email headers, scoring
 boundaries, CLI argument handling) with a mix of hand-built cases and
-real-world-style fixtures under `src/test/resources/{urls,emails}`. A JaCoCo
-report is generated at `target/site/jacoco/index.html` after `mvn test`.
+real-world-style fixtures under `src/test/resources/{urls,emails}`.
+Edge-case coverage includes empty/null/blank/whitespace-only and
+special-character-only input, multi-thousand-character URLs, malformed URLs
+(missing scheme, invalid characters, multiple `://`, trailing garbage),
+punycode/homograph and raw-Unicode domains, malformed/empty/no-header `.eml`
+files, exact-boundary risk-score thresholds, and YAML configs with missing
+or empty sections (brands, TLDs, weights).
+
+`mvn test` runs [JaCoCo](https://www.jacoco.org/jacoco/) automatically and
+generates an HTML report at `target/site/jacoco/index.html` - open that file
+in a browser for a line-by-line, package-by-package breakdown. The suite
+(194 tests as of this writing) maintains roughly **89% line / 78% branch**
+coverage overall; the biggest remaining gap is `SslChecker`'s real-socket
+TLS handshake path, which by design isn't exercised without a live network
+connection (its certificate-decision logic in `analyze()` is covered
+separately, with no socket needed).
 
 ## Project layout
 

@@ -101,6 +101,11 @@ public final class EmailAnalyzer {
             return new MimeMessage(session, emlStream);
         } catch (MessagingException e) {
             throw new IllegalArgumentException("Could not parse .eml message: " + e.getMessage(), e);
+        } catch (RuntimeException e) {
+            // jakarta.mail's header scanner can throw unchecked exceptions (rather than
+            // MessagingException) on certain malformed byte streams, e.g. whitespace-only
+            // input with no header lines at all. Still just malformed input to us.
+            throw new IllegalArgumentException("Could not parse .eml message: " + e.getMessage(), e);
         }
     }
 
