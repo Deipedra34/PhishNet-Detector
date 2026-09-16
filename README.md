@@ -224,7 +224,10 @@ java -jar target/phishnet.jar --url "http://paypa1-secure-login.tk/verify?redire
 # Analyze a single email
 java -jar target/phishnet.jar --email suspicious-message.eml
 
-# Analyze a newline-separated file of URLs ('#' lines are treated as comments)
+# Analyze a newline-separated file of URLs ('#' lines are treated as comments).
+# On an interactive terminal this shows a live progress bar while scanning
+# ("[########------------] 40% (12/30) ETA 0:05", redrawn in place), then
+# prints the normal per-item/summary report once scanning finishes.
 java -jar target/phishnet.jar --batch urls.txt
 
 # Show each analyzer's internal reasoning (parsed URL/email details), not just the summary
@@ -255,6 +258,30 @@ bold labels, ⚠/✓/✗ symbols). Colors are skipped automatically when output 
 a file, and can be turned off explicitly with `--no-color` or by setting the `NO_COLOR` environment
 variable ([no-color.org](https://no-color.org/)). `--quiet` output never includes color, since it's
 meant to be machine-parsable.
+
+### Batch progress
+
+`--batch` on a multi-URL file shows a live progress bar while scanning, redrawn in place on a
+single line (`\r`, not one line per update) with a count, a bar, and an ETA once it has enough
+data to estimate one:
+
+```
+[########------------] 40% (12/30) ETA 0:05
+```
+
+It respects the other output modes instead of fighting them:
+
+- Default / `--verbose`: the bar shows during scanning, then the normal per-item/summary report
+  prints afterwards - scanning and printing are already separate phases, so the bar never lands
+  in the middle of a report line.
+- `--quiet`: no progress bar at all, since quiet output must stay strictly one machine-parsable
+  line per result.
+- `--json`: no progress bar on stdout, so it can never corrupt piped JSON - it renders to stderr
+  instead.
+- `--no-color`: plain ASCII, no ANSI color/cursor codes.
+- Piped/redirected stdout (not a real terminal): the bar is skipped entirely, using the same
+  TTY detection as `--no-color`, since redrawing a line makes no sense outside an interactive
+  terminal.
 
 ### Scan history
 

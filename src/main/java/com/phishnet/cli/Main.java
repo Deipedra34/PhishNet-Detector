@@ -223,8 +223,10 @@ public final class Main implements Callable<Integer> {
                 return runEmail(mode.emailPath, emailAnalyzer, scorer, formatter, reporter, historyWriter,
                         output.json, out);
             } else {
+                ProgressListener progress = ProgressReporter.forBatch(
+                        level, output.json, ColorSupport.isTty(), out, err, colorEnabled);
                 return runBatch(mode.batchPath, urlAnalyzer, scorer, formatter, reporter, historyWriter,
-                        output.json, out);
+                        output.json, out, progress);
             }
         } catch (IOException e) {
             err.println("Error: " + e.getMessage());
@@ -273,19 +275,29 @@ public final class Main implements Callable<Integer> {
 
     private static int runBatch(String batchPath, UrlAnalyzer urlAnalyzer, RiskScorer scorer,
                                  ReportFormatter formatter, Reporter reporter, HistoryWriter historyWriter,
-                                 boolean json, PrintStream out) throws IOException {
+                                 boolean json, PrintStream out, ProgressListener progress) throws IOException {
         List<String> lines = Files.readAllLines(Path.of(batchPath));
-        List<AnalysisEntry> entries = new ArrayList<>();
+        List<String> urls = new ArrayList<>();
         for (String line : lines) {
             String url = line.trim();
-            if (url.isEmpty() || url.startsWith("#")) {
-                continue;
+            if (!url.isEmpty() && !url.startsWith("#")) {
+                urls.add(url);
             }
+        }
+
+        int total = urls.size();
+        List<AnalysisEntry> entries = new ArrayList<>();
+        for (int i = 0; i < total; i++) {
+            String url = urls.get(i);
             UrlAnalysisResult result = urlAnalyzer.analyze(url);
             RiskScore score = scorer.score(result.signals());
             // Written per item, inside the scan loop, so an interrupted batch still leaves partial history.
             historyWriter.record(url, HistoryWriter.TargetType.URL, score);
             entries.add(new AnalysisEntry(url, score));
+            progress.onProgress(i + 1, total);
+        }
+        if (total > 0) {
+            progress.onComplete();
         }
 
         if (json) {

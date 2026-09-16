@@ -20,6 +20,16 @@ public final class ColorSupport {
 
     /** Same decision, reading the real console/env state. */
     public static boolean isEnabled(boolean noColorFlag) {
-        return isEnabled(noColorFlag, System.console() != null, System.getenv("NO_COLOR") != null);
+        return isEnabled(noColorFlag, isTty(), System.getenv("NO_COLOR") != null);
+    }
+
+    /**
+     * True if stdout looks like a real interactive terminal. Shared by color
+     * decisions and by batch-mode's progress bar, since redrawing a line with
+     * '\r' is exactly as meaningless on a piped/redirected stream as color
+     * codes are.
+     */
+    public static boolean isTty() {
+        return System.console() != null;
     }
 }

@@ -49,4 +49,12 @@ class ColorSupportTest {
     void singleArgOverloadWithNoColorFlagIsAlwaysFalse() {
         assertFalse(ColorSupport.isEnabled(true));
     }
+
+    @Test
+    void isTtyDoesNotThrowUnderTestRunner() {
+        // Same real System.console() check batch mode's progress bar relies on
+        // to auto-disable itself outside an interactive terminal - just needs
+        // to resolve without throwing under whatever runs the test suite.
+        ColorSupport.isTty();
+    }
 }

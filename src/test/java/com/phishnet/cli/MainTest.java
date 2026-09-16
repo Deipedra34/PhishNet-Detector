@@ -112,6 +112,61 @@ class MainTest {
         assertTrue(result.stdout().trim().startsWith("["));
     }
 
+    // --- batch progress bar: suppressed / redirected under quiet, json, non-TTY -
+    //
+    // These run through Main.run() with injected ByteArrayOutputStream-backed
+    // streams, but the progress bar's TTY check (ColorSupport.isTty(), shared
+    // with color detection) reads the real process console, not those injected
+    // streams - so whether the bar actually renders here depends on how the test
+    // JVM itself was launched, not on anything these tests control. Rather than
+    // assert "never renders" (flaky - see ProgressReporterTest for that, driven
+    // explicitly by an injected isTty flag), these assert the invariant that
+    // must hold either way: quiet output has exactly its two machine-parsable
+    // lines and never the bar's own text, JSON stdout stays valid JSON with the
+    // bar never leaking into it, and default-mode output stays well-formed even
+    // if a bar rendered ahead of it.
+    private static final java.util.regex.Pattern PROGRESS_BAR_PATTERN =
+            java.util.regex.Pattern.compile("\\[[#-]{20}] \\d+% \\(\\d+/\\d+\\)");
+
+    @Test
+    void batchModeQuietOutputNeverContainsProgressBarText(@TempDir Path tempDir) throws Exception {
+        Path batchFile = tempDir.resolve("urls.txt");
+        Files.writeString(batchFile, "https://example.com\nhttp://192.168.1.1/login\n", StandardCharsets.UTF_8);
+
+        Captured result = runMain("--batch", batchFile.toString(), "--quiet");
+
+        assertEquals(0, result.exitCode());
+        assertFalse(PROGRESS_BAR_PATTERN.matcher(result.stdout()).find());
+        String[] lines = result.stdout().strip().split("\\r?\\n");
+        assertEquals(2, lines.length);
+    }
+
+    @Test
+    void batchModeJsonStdoutStaysValidJsonWithNoProgressBarText(@TempDir Path tempDir) throws Exception {
+        Path batchFile = tempDir.resolve("urls.txt");
+        Files.writeString(batchFile, "https://example.com\nhttp://192.168.1.1/login\n", StandardCharsets.UTF_8);
+
+        Captured result = runMain("--batch", batchFile.toString(), "--json");
+
+        assertEquals(0, result.exitCode());
+        assertFalse(PROGRESS_BAR_PATTERN.matcher(result.stdout()).find(),
+                "progress bar text must never reach stdout in --json mode");
+        assertTrue(result.stdout().trim().startsWith("["));
+        assertTrue(result.stdout().trim().endsWith("]"));
+    }
+
+    @Test
+    void batchModeDefaultOutputStaysWellFormedAheadOfOrWithoutProgressBar(@TempDir Path tempDir) throws Exception {
+        Path batchFile = tempDir.resolve("urls.txt");
+        Files.writeString(batchFile, "https://example.com\nhttp://192.168.1.1/login\n", StandardCharsets.UTF_8);
+
+        Captured result = runMain("--batch", batchFile.toString());
+
+        assertEquals(0, result.exitCode());
+        assertTrue(result.stdout().contains("Target: https://example.com"));
+        assertTrue(result.stdout().contains("Summary: 2 URL(s) analyzed"));
+    }
+
     // --- picocli-generated help/version ---------------------------------------
 
     @Test
