@@ -141,6 +141,18 @@ public final class Main implements Callable<Integer> {
     /** Default scan-history CSV, relative to the current working directory. */
     private static final Path DEFAULT_HISTORY_FILE = Path.of("phishnet-history.csv");
 
+    // --- HTML report option --------------------------------------------------
+
+    @ArgGroup(exclusive = false, multiplicity = "0..1", heading = "%nReport options:%n")
+    private ReportOptions report = new ReportOptions();
+
+    private static final class ReportOptions {
+        @Option(names = "--html-report", paramLabel = "<path>",
+                description = "Write a self-contained, styled HTML report of this run's results to <path> "
+                        + "(for --batch, written once at the end covering the whole run)")
+        private String htmlReportPath;
+    }
+
     // -h/--help and -V/--version are handled automatically via mixinStandardHelpOptions.
 
     private PrintStream out;
@@ -216,17 +228,23 @@ public final class Main implements Callable<Integer> {
         Path historyFile = history.file != null ? Path.of(history.file) : DEFAULT_HISTORY_FILE;
         HistoryWriter historyWriter = new HistoryWriter(historyFile, !history.disabled, err);
 
+        boolean htmlReportEnabled = report.htmlReportPath != null;
+        Path htmlReportFile = htmlReportEnabled ? Path.of(report.htmlReportPath) : null;
+        HtmlReportWriter htmlReportWriter =
+                new HtmlReportWriter(htmlReportFile, htmlReportEnabled, readVersion(), err);
+
         try {
             if (mode.url != null) {
-                return runUrl(mode.url, urlAnalyzer, scorer, formatter, reporter, historyWriter, output.json, out);
+                return runUrl(mode.url, urlAnalyzer, scorer, formatter, reporter, historyWriter, htmlReportWriter,
+                        output.json, out);
             } else if (mode.emailPath != null) {
                 return runEmail(mode.emailPath, emailAnalyzer, scorer, formatter, reporter, historyWriter,
-                        output.json, out);
+                        htmlReportWriter, output.json, out);
             } else {
                 ProgressListener progress = ProgressReporter.forBatch(
                         level, output.json, ColorSupport.isTty(), out, err, colorEnabled);
                 return runBatch(mode.batchPath, urlAnalyzer, scorer, formatter, reporter, historyWriter,
-                        output.json, out, progress);
+                        htmlReportWriter, output.json, out, progress);
             }
         } catch (IOException e) {
             err.println("Error: " + e.getMessage());
@@ -243,10 +261,12 @@ public final class Main implements Callable<Integer> {
     }
 
     private static int runUrl(String url, UrlAnalyzer urlAnalyzer, RiskScorer scorer, ReportFormatter formatter,
-                               Reporter reporter, HistoryWriter historyWriter, boolean json, PrintStream out) {
+                               Reporter reporter, HistoryWriter historyWriter, HtmlReportWriter htmlReportWriter,
+                               boolean json, PrintStream out) {
         UrlAnalysisResult result = urlAnalyzer.analyze(url);
         RiskScore score = scorer.score(result.signals());
         historyWriter.record(url, HistoryWriter.TargetType.URL, score);
+        htmlReportWriter.write(List.of(new AnalysisEntry(url, score, HistoryWriter.TargetType.URL)));
         if (json) {
             out.println(formatter.json(url, score));
             return 0;
@@ -257,11 +277,12 @@ public final class Main implements Callable<Integer> {
 
     private static int runEmail(String emailPath, EmailAnalyzer emailAnalyzer, RiskScorer scorer,
                                  ReportFormatter formatter, Reporter reporter, HistoryWriter historyWriter,
-                                 boolean json, PrintStream out) throws IOException {
+                                 HtmlReportWriter htmlReportWriter, boolean json, PrintStream out) throws IOException {
         try (InputStream in = Files.newInputStream(Path.of(emailPath))) {
             EmailAnalysisResult result = emailAnalyzer.analyze(in);
             RiskScore score = scorer.score(result.allSignals());
             historyWriter.record(emailPath, HistoryWriter.TargetType.EMAIL, score);
+            htmlReportWriter.write(List.of(new AnalysisEntry(emailPath, score, HistoryWriter.TargetType.EMAIL)));
             if (json) {
                 String label = emailPath + " (from: " + result.senderAddress()
                         + ", subject: \"" + result.subject() + "\")";
@@ -275,7 +296,8 @@ public final class Main implements Callable<Integer> {
 
     private static int runBatch(String batchPath, UrlAnalyzer urlAnalyzer, RiskScorer scorer,
                                  ReportFormatter formatter, Reporter reporter, HistoryWriter historyWriter,
-                                 boolean json, PrintStream out, ProgressListener progress) throws IOException {
+                                 HtmlReportWriter htmlReportWriter, boolean json, PrintStream out,
+                                 ProgressListener progress) throws IOException {
         List<String> lines = Files.readAllLines(Path.of(batchPath));
         List<String> urls = new ArrayList<>();
         for (String line : lines) {
@@ -299,6 +321,9 @@ public final class Main implements Callable<Integer> {
         if (total > 0) {
             progress.onComplete();
         }
+        // Written once here, after the loop, covering the whole batch - unlike scan
+        // history, which is deliberately written per item inside the loop above.
+        htmlReportWriter.write(entries);
 
         if (json) {
             out.println(formatter.jsonBatch(entries));
@@ -321,16 +346,23 @@ public final class Main implements Callable<Integer> {
     }
 
     /** Reads the version filtered into version.properties at build time, so it always matches the pom.xml version. */
+    private static String readVersion() {
+        Properties props = new Properties();
+        try (InputStream in = Main.class.getResourceAsStream("/version.properties")) {
+            if (in != null) {
+                props.load(in);
+            }
+        } catch (IOException e) {
+            // Fall through to the "unknown" default below - a missing/unreadable
+            // version.properties must never prevent a scan from running.
+        }
+        return props.getProperty("version", "unknown");
+    }
+
     static final class VersionProvider implements IVersionProvider {
         @Override
-        public String[] getVersion() throws Exception {
-            Properties props = new Properties();
-            try (InputStream in = Main.class.getResourceAsStream("/version.properties")) {
-                if (in != null) {
-                    props.load(in);
-                }
-            }
-            return new String[] {"phishnet " + props.getProperty("version", "unknown")};
+        public String[] getVersion() {
+            return new String[] {"phishnet " + readVersion()};
         }
     }
 }

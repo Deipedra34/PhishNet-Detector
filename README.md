@@ -158,41 +158,45 @@ $ java -jar target/phishnet.jar --help
 Usage:
 phishnet [-hV] [--config=<path>] (--url=<url> | --email=<file.eml> |
          --batch=<file>) [[--json] [--no-color]] [-v | -q]
-         [[--history-file=<path>] [--no-history]]
+         [[--history-file=<path>] [--no-history]] [[--html-report=<path>]]
 
 Analyzes URLs, TLS certificates, and .eml email files for phishing indicators,
 and combines whatever it finds into a single 0-100 risk score with a
 Low/Medium/High label and a plain-language recommendation.
 
 Options:
-      --config=<path>      Use a custom YAML config instead of the bundled
-                             default
-  -h, --help               Show this help message and exit.
-  -V, --version            Print version information and exit.
+      --config=<path>        Use a custom YAML config instead of the bundled
+                               default
+  -h, --help                 Show this help message and exit.
+  -V, --version              Print version information and exit.
 
 Input options:
-      --url=<url>          Analyze a single URL
-      --email=<file.eml>   Analyze a single .eml email file
-      --batch=<file>       Analyze a newline-separated file of URLs ('#'
-                             comments allowed)
+      --url=<url>            Analyze a single URL
+      --email=<file.eml>     Analyze a single .eml email file
+      --batch=<file>         Analyze a newline-separated file of URLs ('#'
+                               comments allowed)
 
 Output options:
-      --json               Output machine-readable JSON instead of a
-                             human-readable report
-      --no-color           Disable ANSI colors even if the terminal supports
-                             them
+      --json                 Output machine-readable JSON instead of a
+                               human-readable report
+      --no-color             Disable ANSI colors even if the terminal supports
+                               them
 
-  -v, --verbose            Show each analyzer's internal reasoning, not just
-                             the summary
-  -q, --quiet              Print one machine-parsable line only (LEVEL SCORE
-                             TARGET); exit code reflects risk
+  -v, --verbose              Show each analyzer's internal reasoning, not just
+                               the summary
+  -q, --quiet                Print one machine-parsable line only (LEVEL SCORE
+                               TARGET); exit code reflects risk
 
 History options:
-      --history-file=<path>
-                           Append scan results to this CSV file (default: .
-                             /phishnet-history.csv)
-      --no-history         Do not append this run's results to the scan history
-                             CSV
+      --history-file=<path>  Append scan results to this CSV file (default: .
+                               /phishnet-history.csv)
+      --no-history           Do not append this run's results to the scan
+                               history CSV
+
+Report options:
+      --html-report=<path>   Write a self-contained, styled HTML report of this
+                               run's results to <path> (for --batch, written
+                               once at the end covering the whole run)
 
 Examples:
   phishnet --url https://example.com
@@ -251,6 +255,9 @@ java -jar target/phishnet.jar --url "https://example.com" --history-file ~/phish
 
 # Don't record this run in the scan history at all
 java -jar target/phishnet.jar --url "https://example.com" --no-history
+
+# Write a self-contained HTML report of this run's results
+java -jar target/phishnet.jar --batch urls.txt --html-report scan-report.html
 ```
 
 Output is colored automatically when stdout is a real terminal (HIGH=red, MEDIUM=yellow, LOW=green,
@@ -316,6 +323,36 @@ timestamp,target,type,risk_score,risk_label,signals
 2026-09-03T19:03:41.036Z,http://paypa1-secure-login.tk/verify?redirect=http://evil.tk/x,URL,70,HIGH,suspiciousTld;typosquatting;nestedRedirect
 2026-09-03T19:03:41.425Z,"https://example.com/path?x=1,2",URL,0,LOW,
 ```
+
+### HTML report
+
+`--html-report <path>` writes a single, self-contained HTML file (inline CSS,
+no external assets or CDN links, no JavaScript) summarizing the run - open it
+straight in a browser, even offline:
+
+```bash
+java -jar target/phishnet.jar --batch urls.txt --html-report scan-report.html
+java -jar target/phishnet.jar --url "https://example.com" --html-report scan-report.html
+```
+
+It works the same way for a single `--url`/`--email` scan (a one-row report)
+and for `--batch` (every item scanned in that run) - it can be combined with
+`--json`, `--quiet`, or `--verbose` without changing what those print. For
+`--batch`, the report is written once at the end, covering the whole run, not
+once per item. The report contains:
+
+- **Header**: tool name and version, the timestamp the scan ran, and the
+  total number of items scanned.
+- **Summary**: counts and percentages of LOW/MEDIUM/HIGH results.
+- **Results table**: one row per scanned item - target (URL or `.eml` path),
+  type, risk score, a color-coded risk label (green/yellow/red, matching the
+  terminal output's semantics), and the signals that fired for it. Rows are
+  sorted HIGH risk first, then MEDIUM, then LOW.
+
+If the output path's parent directory doesn't exist, it's created
+automatically. If the report can't be written (permissions, disk full, ...),
+a warning is printed to stderr and the scan still completes normally - same
+failure handling as the scan history CSV.
 
 ### Sample output
 
@@ -431,7 +468,7 @@ or empty sections (brands, TLDs, weights).
 `mvn test` runs [JaCoCo](https://www.jacoco.org/jacoco/) automatically and
 generates an HTML report at `target/site/jacoco/index.html` - open that file
 in a browser for a line-by-line, package-by-package breakdown. The suite
-(194 tests as of this writing) maintains roughly **89% line / 78% branch**
+(233 tests as of this writing) maintains roughly **90% line / 79% branch**
 coverage overall; the biggest remaining gap is `SslChecker`'s real-socket
 TLS handshake path, which by design isn't exercised without a live network
 connection (its certificate-decision logic in `analyze()` is covered
@@ -444,7 +481,7 @@ src/main/java/com/phishnet/
   analyzer/   UrlAnalyzer, SslChecker, EmailAnalyzer
   model/      Signal, RiskScore, UrlComponents, PhishNetConfig, ...
   scoring/    RiskScorer
-  cli/        Main (picocli @Command), ReportFormatter, Reporter, OutputLevel, HistoryWriter
+  cli/        Main (picocli @Command), ReportFormatter, Reporter, OutputLevel, HistoryWriter, HtmlReportWriter
   util/       LevenshteinDistance, HomoglyphUtil, ConfigLoader, AnsiColor, ColorSupport
 src/main/resources/phishnet-config.yaml
 src/main/resources/version.properties  (Maven-filtered; feeds --version, see Contributing)

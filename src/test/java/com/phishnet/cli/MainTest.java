@@ -198,6 +198,7 @@ class MainTest {
         assertTrue(result.stdout().contains("--quiet"));
         assertTrue(result.stdout().contains("--history-file"));
         assertTrue(result.stdout().contains("--no-history"));
+        assertTrue(result.stdout().contains("--html-report"));
     }
 
     @Test
@@ -480,5 +481,88 @@ class MainTest {
         assertEquals(0, result.exitCode());
         assertTrue(result.stdout().contains("Risk Score"));
         assertTrue(result.stderr().contains("could not write scan history"));
+    }
+
+    // --- HTML report ------------------------------------------------------------
+
+    @Test
+    void urlModeWritesHtmlReportWithOneRow(@TempDir Path tempDir) throws Exception {
+        Path reportFile = tempDir.resolve("report.html");
+
+        Captured result = runMain("--url", "https://example.com", "--html-report", reportFile.toString());
+
+        assertEquals(0, result.exitCode());
+        assertTrue(Files.exists(reportFile));
+        String html = Files.readString(reportFile, StandardCharsets.UTF_8);
+        assertTrue(html.contains("https://example.com"));
+        assertTrue(html.contains("1 item scanned"));
+    }
+
+    @Test
+    void emailModeWritesHtmlReportWithEmailType(@TempDir Path tempDir) throws Exception {
+        Path emlFile = tempDir.resolve("phish.eml");
+        Files.writeString(emlFile,
+                "From: \"PayPal\" <alert@random-mailer.info>\n"
+                        + "To: victim@example.com\n"
+                        + "Subject: Verify immediately\n"
+                        + "Content-Type: text/plain; charset=UTF-8\n\n"
+                        + "Your account will be suspended. Verify immediately: http://192.168.1.1/login\n",
+                StandardCharsets.UTF_8);
+        Path reportFile = tempDir.resolve("report.html");
+
+        Captured result = runMain("--email", emlFile.toString(), "--html-report", reportFile.toString());
+
+        assertEquals(0, result.exitCode());
+        String html = Files.readString(reportFile, StandardCharsets.UTF_8);
+        assertTrue(html.contains(emlFile.toString().replace("<", "&lt;").replace(">", "&gt;"))
+                || html.contains(emlFile.toString()));
+        assertTrue(html.contains("EMAIL"));
+    }
+
+    @Test
+    void batchModeWritesHtmlReportOnceForWholeBatch(@TempDir Path tempDir) throws Exception {
+        Path batchFile = tempDir.resolve("urls.txt");
+        Files.writeString(batchFile,
+                "https://example.com\nhttp://192.168.1.1/login\nhttp://free-prize.tk\n", StandardCharsets.UTF_8);
+        Path reportFile = tempDir.resolve("report.html");
+
+        Captured result = runMain("--batch", batchFile.toString(), "--html-report", reportFile.toString());
+
+        assertEquals(0, result.exitCode());
+        String html = Files.readString(reportFile, StandardCharsets.UTF_8);
+        assertTrue(html.contains("3 items scanned"));
+        assertEquals(3, html.lines().filter(l -> l.contains("<tr class=")).count());
+    }
+
+    @Test
+    void htmlReportNotWrittenWhenFlagAbsent(@TempDir Path tempDir) {
+        Path reportFile = tempDir.resolve("report.html");
+
+        Captured result = runMain("--url", "https://example.com");
+
+        assertEquals(0, result.exitCode());
+        assertFalse(Files.exists(reportFile));
+    }
+
+    @Test
+    void htmlReportCreatesMissingParentDirectory(@TempDir Path tempDir) {
+        Path reportFile = tempDir.resolve("nested/reports/report.html");
+
+        Captured result = runMain("--url", "https://example.com", "--html-report", reportFile.toString());
+
+        assertEquals(0, result.exitCode());
+        assertTrue(Files.exists(reportFile));
+    }
+
+    @Test
+    void htmlReportWorksAlongsideJsonAndQuietModes(@TempDir Path tempDir) throws Exception {
+        Path reportFile = tempDir.resolve("report.html");
+
+        Captured result = runMain("--url", "https://bit.ly/xyz", "--json", "--html-report", reportFile.toString());
+
+        assertEquals(0, result.exitCode());
+        assertTrue(result.stdout().trim().startsWith("{"));
+        assertTrue(Files.exists(reportFile));
+        assertTrue(Files.readString(reportFile, StandardCharsets.UTF_8).contains("bit.ly"));
     }
 }
