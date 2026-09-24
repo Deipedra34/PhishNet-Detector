@@ -31,6 +31,10 @@
         <jacoco.plugin.version>0.8.15</jacoco.plugin.version>
 
         <main.class>com.phishnet.cli.Main</main.class>
+
+        <!-- Tests tagged "network" make real WHOIS connections; keep them out of the
+             default (and CI) run. Opt in with: mvn test -Dgroups=network -DexcludedGroups=none -->
+        <excludedGroups>network</excludedGroups>
     </properties>
 
     <dependencies>

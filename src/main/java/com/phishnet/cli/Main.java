@@ -1,7 +1,11 @@
 package com.phishnet.cli;
 
+import com.phishnet.analyzer.DomainAgeChecker;
 import com.phishnet.analyzer.EmailAnalyzer;
+import com.phishnet.analyzer.SocketWhoisClient;
 import com.phishnet.analyzer.UrlAnalyzer;
+import com.phishnet.analyzer.WhoisClient;
+import com.phishnet.model.DomainAgeResult;
 import com.phishnet.model.EmailAnalysisResult;
 import com.phishnet.model.PhishNetConfig;
 import com.phishnet.model.RiskLevel;
@@ -153,10 +157,23 @@ public final class Main implements Callable<Integer> {
         private String htmlReportPath;
     }
 
+    // --- network options -----------------------------------------------------
+
+    @ArgGroup(exclusive = false, multiplicity = "0..1", heading = "%nNetwork options:%n")
+    private NetworkOptions network = new NetworkOptions();
+
+    private static final class NetworkOptions {
+        @Option(names = "--no-whois",
+                description = "Skip the live WHOIS domain-age lookup (for offline/fast scans or CI); "
+                        + "domain age is then left out of the score entirely")
+        private boolean noWhois;
+    }
+
     // -h/--help and -V/--version are handled automatically via mixinStandardHelpOptions.
 
     private PrintStream out;
     private PrintStream err;
+    private WhoisClient whoisClient;
 
     private Main() {
     }
@@ -175,9 +192,15 @@ public final class Main implements Callable<Integer> {
 
     /** Runs against injected streams and returns an exit code - never calls System.exit itself, so it's testable. */
     static int run(String[] args, PrintStream out, PrintStream err) {
+        return run(args, out, err, new SocketWhoisClient());
+    }
+
+    /** Same as {@link #run(String[], PrintStream, PrintStream)}, with the WHOIS transport swapped out (for tests). */
+    static int run(String[] args, PrintStream out, PrintStream err, WhoisClient whoisClient) {
         Main app = new Main();
         app.out = out;
         app.err = err;
+        app.whoisClient = whoisClient;
 
         CommandLine cmd = new CommandLine(app);
         cmd.setOut(new PrintWriter(out, true, StandardCharsets.UTF_8));
@@ -233,18 +256,21 @@ public final class Main implements Callable<Integer> {
         HtmlReportWriter htmlReportWriter =
                 new HtmlReportWriter(htmlReportFile, htmlReportEnabled, readVersion(), err);
 
+        // null = --no-whois: no lookups at all, every result is DomainAgeResult.skipped().
+        DomainAgeChecker domainAgeChecker = network.noWhois ? null : new DomainAgeChecker(whoisClient);
+
         try {
             if (mode.url != null) {
-                return runUrl(mode.url, urlAnalyzer, scorer, formatter, reporter, historyWriter, htmlReportWriter,
-                        output.json, out);
+                return runUrl(mode.url, urlAnalyzer, domainAgeChecker, scorer, formatter, reporter, historyWriter,
+                        htmlReportWriter, output.json, out);
             } else if (mode.emailPath != null) {
                 return runEmail(mode.emailPath, emailAnalyzer, scorer, formatter, reporter, historyWriter,
                         htmlReportWriter, output.json, out);
             } else {
                 ProgressListener progress = ProgressReporter.forBatch(
                         level, output.json, ColorSupport.isTty(), out, err, colorEnabled);
-                return runBatch(mode.batchPath, urlAnalyzer, scorer, formatter, reporter, historyWriter,
-                        htmlReportWriter, output.json, out, progress);
+                return runBatch(mode.batchPath, urlAnalyzer, domainAgeChecker, scorer, formatter, reporter,
+                        historyWriter, htmlReportWriter, output.json, out, progress);
             }
         } catch (IOException e) {
             err.println("Error: " + e.getMessage());
@@ -260,19 +286,25 @@ public final class Main implements Callable<Integer> {
         return verbosity.verbose ? OutputLevel.VERBOSE : OutputLevel.NORMAL;
     }
 
-    private static int runUrl(String url, UrlAnalyzer urlAnalyzer, RiskScorer scorer, ReportFormatter formatter,
-                               Reporter reporter, HistoryWriter historyWriter, HtmlReportWriter htmlReportWriter,
+    private static int runUrl(String url, UrlAnalyzer urlAnalyzer, DomainAgeChecker domainAgeChecker,
+                               RiskScorer scorer, ReportFormatter formatter, Reporter reporter,
+                               HistoryWriter historyWriter, HtmlReportWriter htmlReportWriter,
                                boolean json, PrintStream out) {
         UrlAnalysisResult result = urlAnalyzer.analyze(url);
-        RiskScore score = scorer.score(result.signals());
-        historyWriter.record(url, HistoryWriter.TargetType.URL, score);
-        htmlReportWriter.write(List.of(new AnalysisEntry(url, score, HistoryWriter.TargetType.URL)));
+        DomainAgeResult domainAge = domainAgeFor(result, domainAgeChecker);
+        RiskScore score = scorer.score(result.signals(), domainAge);
+        historyWriter.record(url, HistoryWriter.TargetType.URL, score, domainAge);
+        htmlReportWriter.write(List.of(new AnalysisEntry(url, score, HistoryWriter.TargetType.URL, domainAge)));
         if (json) {
             out.println(formatter.json(url, score));
             return 0;
         }
-        reporter.reportUrl(url, result, score);
+        reporter.reportUrl(url, result, score, domainAge);
         return exitCodeFor(reporter.level(), score.level());
+    }
+
+    private static DomainAgeResult domainAgeFor(UrlAnalysisResult result, DomainAgeChecker checker) {
+        return checker == null ? DomainAgeResult.skipped() : checker.check(result.components());
     }
 
     private static int runEmail(String emailPath, EmailAnalyzer emailAnalyzer, RiskScorer scorer,
@@ -294,8 +326,9 @@ public final class Main implements Callable<Integer> {
         }
     }
 
-    private static int runBatch(String batchPath, UrlAnalyzer urlAnalyzer, RiskScorer scorer,
-                                 ReportFormatter formatter, Reporter reporter, HistoryWriter historyWriter,
+    private static int runBatch(String batchPath, UrlAnalyzer urlAnalyzer, DomainAgeChecker domainAgeChecker,
+                                 RiskScorer scorer, ReportFormatter formatter, Reporter reporter,
+                                 HistoryWriter historyWriter,
                                  HtmlReportWriter htmlReportWriter, boolean json, PrintStream out,
                                  ProgressListener progress) throws IOException {
         List<String> lines = Files.readAllLines(Path.of(batchPath));
@@ -312,10 +345,11 @@ public final class Main implements Callable<Integer> {
         for (int i = 0; i < total; i++) {
             String url = urls.get(i);
             UrlAnalysisResult result = urlAnalyzer.analyze(url);
-            RiskScore score = scorer.score(result.signals());
+            DomainAgeResult domainAge = domainAgeFor(result, domainAgeChecker);
+            RiskScore score = scorer.score(result.signals(), domainAge);
             // Written per item, inside the scan loop, so an interrupted batch still leaves partial history.
-            historyWriter.record(url, HistoryWriter.TargetType.URL, score);
-            entries.add(new AnalysisEntry(url, score));
+            historyWriter.record(url, HistoryWriter.TargetType.URL, score, domainAge);
+            entries.add(new AnalysisEntry(url, score, HistoryWriter.TargetType.URL, domainAge));
             progress.onProgress(i + 1, total);
         }
         if (total > 0) {

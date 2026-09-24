@@ -1,5 +1,6 @@
 package com.phishnet.cli;
 
+import com.phishnet.model.DomainAgeResult;
 import com.phishnet.model.RiskLevel;
 import com.phishnet.model.RiskScore;
 import com.phishnet.model.Signal;
@@ -137,7 +138,7 @@ public final class HtmlReportWriter {
         sb.append("    <h2>Results</h2>\n");
         sb.append("    <table>\n");
         sb.append("      <thead><tr><th>Target</th><th>Type</th><th>Score</th>"
-                + "<th>Risk</th><th>Signals</th></tr></thead>\n");
+                + "<th>Risk</th><th>Domain Age</th><th>Signals</th></tr></thead>\n");
         sb.append("      <tbody>\n");
         for (AnalysisEntry entry : sortedEntries) {
             sb.append(renderRow(entry));
@@ -158,9 +159,21 @@ public final class HtmlReportWriter {
         sb.append("          <td>").append(score.score()).append("/100</td>\n");
         sb.append("          <td><span class=\"badge ").append(cssClass).append("\">")
                 .append(score.level().name()).append("</span></td>\n");
+        sb.append("          <td>").append(renderDomainAge(entry.domainAge())).append("</td>\n");
         sb.append("          <td>").append(renderSignals(score.signals())).append("</td>\n");
         sb.append("        </tr>\n");
         return sb.toString();
+    }
+
+    /** Formatted age, "unknown" for a failed lookup, or a muted dash when no lookup was done. */
+    private static String renderDomainAge(DomainAgeResult domainAge) {
+        if (domainAge.isSkipped()) {
+            return "<span class=\"none\">&mdash;</span>";
+        }
+        if (!domainAge.isKnown()) {
+            return "<span class=\"none\">unknown</span>";
+        }
+        return escapeHtml(domainAge.formatAge());
     }
 
     private String renderSignals(List<Signal> signals) {

@@ -1,5 +1,6 @@
 package com.phishnet.cli;
 
+import com.phishnet.model.DomainAgeResult;
 import com.phishnet.model.RiskLevel;
 import com.phishnet.model.RiskScore;
 import com.phishnet.model.Signal;
@@ -12,6 +13,7 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.LocalDate;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -20,7 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class HistoryWriterTest {
 
-    private static final String HEADER = "timestamp,target,type,risk_score,risk_label,signals";
+    private static final String HEADER = "timestamp,target,type,risk_score,risk_label,signals,domain_age_days";
 
     private final ByteArrayOutputStream errBytes = new ByteArrayOutputStream();
     private final PrintStream err = new PrintStream(errBytes, true, StandardCharsets.UTF_8);
@@ -46,7 +48,7 @@ class HistoryWriterTest {
         List<String> lines = readLines(file);
         assertEquals(2, lines.size());
         assertEquals(HEADER, lines.get(0));
-        assertTrue(lines.get(1).endsWith(",https://example.com,URL,0,LOW,"));
+        assertTrue(lines.get(1).endsWith(",https://example.com,URL,0,LOW,,"));
     }
 
     @Test
@@ -62,8 +64,8 @@ class HistoryWriterTest {
         assertEquals(3, lines.size());
         assertEquals(HEADER, lines.get(0));
         assertEquals(1, lines.stream().filter(l -> l.equals(HEADER)).count());
-        assertTrue(lines.get(1).endsWith(",https://a.example,URL,10,LOW,urlShortener"));
-        assertTrue(lines.get(2).endsWith(",b.eml,EMAIL,80,HIGH,senderMismatch"));
+        assertTrue(lines.get(1).endsWith(",https://a.example,URL,10,LOW,urlShortener,"));
+        assertTrue(lines.get(2).endsWith(",b.eml,EMAIL,80,HIGH,senderMismatch,"));
     }
 
     @Test
@@ -73,7 +75,7 @@ class HistoryWriterTest {
                 score(70, RiskLevel.HIGH, "suspiciousTld", "typosquatting", "nestedRedirect"));
 
         List<String> lines = readLines(file);
-        assertTrue(lines.get(1).endsWith(",http://evil.tk,URL,70,HIGH,suspiciousTld;typosquatting;nestedRedirect"));
+        assertTrue(lines.get(1).endsWith(",http://evil.tk,URL,70,HIGH,suspiciousTld;typosquatting;nestedRedirect,"));
     }
 
     @Test
@@ -153,5 +155,23 @@ class HistoryWriterTest {
         assertTrue(warnings.contains("could not write scan history"), "stderr was: " + warnings);
         // Warns at most once even across multiple failed records.
         assertEquals(1, warnings.lines().filter(l -> l.contains("could not write scan history")).count());
+    }
+
+    @Test
+    void domainAgeColumnIsDaysUnknownOrEmpty(@TempDir Path dir) throws Exception {
+        Path file = dir.resolve("phishnet-history.csv");
+        HistoryWriter writer = new HistoryWriter(file, true, err);
+
+        writer.record("https://new.example", HistoryWriter.TargetType.URL, score(30, RiskLevel.MEDIUM, "domainAgeNew"),
+                DomainAgeResult.known("new.example", LocalDate.of(2026, 9, 20), 4, "whois.test"));
+        writer.record("https://slow.example", HistoryWriter.TargetType.URL, score(0, RiskLevel.LOW),
+                DomainAgeResult.unknown("slow.example", "WHOIS lookup timed out"));
+        writer.record("https://offline.example", HistoryWriter.TargetType.URL, score(0, RiskLevel.LOW),
+                DomainAgeResult.skipped());
+
+        List<String> lines = readLines(file);
+        assertTrue(lines.get(1).endsWith(",MEDIUM,domainAgeNew,4"), lines.get(1));
+        assertTrue(lines.get(2).endsWith(",LOW,,unknown"), lines.get(2));
+        assertTrue(lines.get(3).endsWith(",LOW,,"), lines.get(3));
     }
 }

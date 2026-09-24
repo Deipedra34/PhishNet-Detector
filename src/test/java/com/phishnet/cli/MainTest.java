@@ -1,15 +1,19 @@
 package com.phishnet.cli;
 
+import com.phishnet.analyzer.WhoisClient;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.LocalDate;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -20,7 +24,20 @@ class MainTest {
     private record Captured(int exitCode, String stdout, String stderr) {
     }
 
+    /** Stands in for the real socket client so no test in this class can ever reach a WHOIS server. */
+    private static final WhoisClient OFFLINE_WHOIS = (server, query, timeoutMillis) -> {
+        throw new IOException("network disabled in tests");
+    };
+
     private static Captured runMain(String... args) {
+        // WHOIS lookups are network calls: unless a test is exercising them (via
+        // runMainWithWhois), turn them off exactly as a CI user would.
+        String[] effectiveArgs = Arrays.copyOf(args, args.length + 1);
+        effectiveArgs[args.length] = "--no-whois";
+        return runMainWithWhois(OFFLINE_WHOIS, effectiveArgs);
+    }
+
+    private static Captured runMainWithWhois(WhoisClient whoisClient, String... args) {
         // Scan-history logging is a side effect of every scan and defaults to
         // ./phishnet-history.csv in the working directory. Unless a test is
         // explicitly exercising history, suppress it so the suite never writes
@@ -38,7 +55,7 @@ class MainTest {
         ByteArrayOutputStream errBytes = new ByteArrayOutputStream();
         try (PrintStream out = new PrintStream(outBytes, true, StandardCharsets.UTF_8);
              PrintStream err = new PrintStream(errBytes, true, StandardCharsets.UTF_8)) {
-            int code = Main.run(effectiveArgs, out, err);
+            int code = Main.run(effectiveArgs, out, err, whoisClient);
             out.flush();
             err.flush();
             return new Captured(code, outBytes.toString(StandardCharsets.UTF_8),
@@ -397,7 +414,7 @@ class MainTest {
 
         List<String> lines = Files.readAllLines(historyFile, StandardCharsets.UTF_8);
         assertEquals(2, lines.size());
-        assertEquals("timestamp,target,type,risk_score,risk_label,signals", lines.get(0));
+        assertEquals("timestamp,target,type,risk_score,risk_label,signals,domain_age_days", lines.get(0));
         assertTrue(lines.get(1).contains(",https://example.com,URL,"));
 
         // A second run appends without rewriting the header.
@@ -564,5 +581,123 @@ class MainTest {
         assertTrue(result.stdout().trim().startsWith("{"));
         assertTrue(Files.exists(reportFile));
         assertTrue(Files.readString(reportFile, StandardCharsets.UTF_8).contains("bit.ly"));
+    }
+
+    // --- WHOIS domain age ------------------------------------------------------
+    // All of these use a fake WhoisClient - nothing here opens a real socket.
+
+    /** A fake registry that reports the domain as created {@code daysAgo} days before today. */
+    private static WhoisClient registryReporting(long daysAgo, AtomicInteger calls) {
+        String created = LocalDate.now().minusDays(daysAgo).toString();
+        return (server, query, timeoutMillis) -> {
+            calls.incrementAndGet();
+            return "Domain Name: " + query.toUpperCase() + "\r\nCreation Date: " + created + "T10:00:00Z\r\n";
+        };
+    }
+
+    @Test
+    void urlModeShowsDomainAgeAndFlagsNewDomain() {
+        AtomicInteger calls = new AtomicInteger();
+        Captured result = runMainWithWhois(registryReporting(10, calls), "--url", "https://fresh-site.com/login");
+
+        assertEquals(0, result.exitCode());
+        assertTrue(result.stdout().contains("Domain Age: 10 days"), result.stdout());
+        assertTrue(result.stdout().contains("[domainAgeNew]"), result.stdout());
+        assertEquals(1, calls.get());
+    }
+
+    @Test
+    void verboseModeShowsCreationDateAndServer() {
+        Captured result = runMainWithWhois(registryReporting(400, new AtomicInteger()),
+                "--url", "https://example.com", "--verbose");
+
+        String created = LocalDate.now().minusDays(400).toString();
+        assertTrue(result.stdout().contains("Domain Age: 13 months (400 days, created " + created
+                + ", via whois.verisign-grs.com)"), result.stdout());
+    }
+
+    @Test
+    void quietModeNeverShowsDomainAge() {
+        Captured result = runMainWithWhois(registryReporting(10, new AtomicInteger()),
+                "--url", "https://fresh-site.com", "--quiet");
+
+        assertFalse(result.stdout().contains("Domain Age"));
+        assertEquals(1, result.stdout().trim().lines().count());
+    }
+
+    @Test
+    void failedWhoisLookupShowsUnknownAndLeavesScoreNeutral() {
+        Captured withFailure = runMainWithWhois(OFFLINE_WHOIS, "--url", "https://bit.ly/xyz");
+        Captured withoutWhois = runMain("--url", "https://bit.ly/xyz");
+
+        assertEquals(0, withFailure.exitCode());
+        assertTrue(withFailure.stdout().contains("Domain Age: unknown"), withFailure.stdout());
+        assertEquals(riskScoreLine(withoutWhois.stdout()), riskScoreLine(withFailure.stdout()));
+    }
+
+    @Test
+    void noWhoisFlagSkipsLookupEntirely() {
+        AtomicInteger calls = new AtomicInteger();
+        Captured result = runMainWithWhois(registryReporting(10, calls),
+                "--url", "https://fresh-site.com", "--no-whois");
+
+        assertEquals(0, calls.get());
+        assertFalse(result.stdout().contains("Domain Age"));
+        assertFalse(result.stdout().contains("domainAgeNew"));
+    }
+
+    @Test
+    void ipHostUrlsAreNotLookedUp() {
+        AtomicInteger calls = new AtomicInteger();
+        Captured result = runMainWithWhois(registryReporting(10, calls), "--url", "http://192.168.1.1/login");
+
+        assertEquals(0, calls.get());
+        assertFalse(result.stdout().contains("Domain Age"));
+    }
+
+    @Test
+    void batchModeShowsDomainAgePerEntryAndCachesRepeatedDomains(@TempDir Path tempDir) throws Exception {
+        Path urls = tempDir.resolve("urls.txt");
+        Files.writeString(urls, "https://fresh-site.com/a\nhttps://www.fresh-site.com/b\n", StandardCharsets.UTF_8);
+        AtomicInteger calls = new AtomicInteger();
+
+        Captured result = runMainWithWhois(registryReporting(10, calls), "--batch", urls.toString());
+
+        assertEquals(2, countOccurrences(result.stdout(), "Domain Age: 10 days"), result.stdout());
+        assertEquals(1, calls.get(), "same registrable domain should only be looked up once per run");
+    }
+
+    @Test
+    void domainAgeIsWrittenToHistoryAndHtmlReport(@TempDir Path tempDir) throws Exception {
+        Path history = tempDir.resolve("history.csv");
+        Path report = tempDir.resolve("report.html");
+
+        runMainWithWhois(registryReporting(10, new AtomicInteger()), "--url", "https://fresh-site.com",
+                "--history-file", history.toString(), "--html-report", report.toString());
+
+        List<String> lines = Files.readAllLines(history, StandardCharsets.UTF_8);
+        assertTrue(lines.get(1).endsWith("domainAgeNew,10"), lines.get(1));
+        String html = Files.readString(report, StandardCharsets.UTF_8);
+        assertTrue(html.contains("<th>Domain Age</th>"));
+        assertTrue(html.contains("<td>10 days</td>"), html);
+    }
+
+    @Test
+    void helpListsNoWhoisOption() {
+        Captured result = runMain("--help");
+        assertTrue(result.stdout().contains("--no-whois"));
+        assertTrue(result.stdout().contains("Network options:"));
+    }
+
+    private static String riskScoreLine(String stdout) {
+        return stdout.lines().filter(l -> l.startsWith("Risk Score:")).findFirst().orElse("");
+    }
+
+    private static int countOccurrences(String haystack, String needle) {
+        int count = 0;
+        for (int i = haystack.indexOf(needle); i >= 0; i = haystack.indexOf(needle, i + 1)) {
+            count++;
+        }
+        return count;
     }
 }

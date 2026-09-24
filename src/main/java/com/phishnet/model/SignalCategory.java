@@ -6,5 +6,6 @@ package com.phishnet.model;
 public enum SignalCategory {
     URL,
     SSL,
-    EMAIL
+    EMAIL,
+    DOMAIN
 }

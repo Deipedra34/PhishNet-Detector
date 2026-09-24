@@ -1,5 +1,6 @@
 package com.phishnet.cli;
 
+import com.phishnet.model.DomainAgeResult;
 import com.phishnet.model.RiskScore;
 import com.phishnet.model.Signal;
 
@@ -32,7 +33,7 @@ public final class HistoryWriter {
         EMAIL
     }
 
-    static final String HEADER = "timestamp,target,type,risk_score,risk_label,signals";
+    static final String HEADER = "timestamp,target,type,risk_score,risk_label,signals,domain_age_days";
 
     private final Path file;
     private final boolean enabled;
@@ -57,6 +58,15 @@ public final class HistoryWriter {
      * file is new or empty. I/O errors are reported to stderr (once) and swallowed.
      */
     public void record(String target, TargetType type, RiskScore score) {
+        record(target, type, score, DomainAgeResult.skipped());
+    }
+
+    /**
+     * Like {@link #record(String, TargetType, RiskScore)}, with a domain age column:
+     * whole days for a known age, {@code unknown} for a failed lookup, and empty
+     * when no lookup was done ({@code --no-whois}, IP hosts, email scans).
+     */
+    public void record(String target, TargetType type, RiskScore score, DomainAgeResult domainAge) {
         if (!enabled) {
             return;
         }
@@ -71,7 +81,8 @@ public final class HistoryWriter {
                 csvField(type.name()),
                 csvField(Integer.toString(score.score())),
                 csvField(score.level().name()),
-                csvField(signals));
+                csvField(signals),
+                csvField(domainAgeField(domainAge)));
 
         try {
             boolean needHeader = !Files.exists(file) || Files.size(file) == 0;
@@ -90,6 +101,13 @@ public final class HistoryWriter {
                 warned = true;
             }
         }
+    }
+
+    private static String domainAgeField(DomainAgeResult domainAge) {
+        if (domainAge == null || domainAge.isSkipped()) {
+            return "";
+        }
+        return domainAge.isKnown() ? Long.toString(domainAge.ageDays()) : "unknown";
     }
 
     /**

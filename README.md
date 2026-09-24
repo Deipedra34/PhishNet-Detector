@@ -38,6 +38,13 @@ keywords, and scoring weights - lives in a YAML config file, not in the code.
 - IP-address-as-domain URLs (`http://192.168.1.1/login`)
 - Abnormally long URLs, excessive query parameters, heavy percent-encoding, and nested/embedded redirect URLs
 
+**Domain age** (`DomainAgeChecker`, live WHOIS - disable with `--no-whois`)
+
+- Newly registered domains (under 30 days) and relatively new ones (30-180
+  days), via a real-time WHOIS lookup of the URL's registrable domain -
+  throwaway phishing domains are typically only days or weeks old
+- Well-established domains (over 180 days) get a small score reduction
+
 **TLS certificates** (`SslChecker`)
 
 - No certificate presented at all
@@ -130,6 +137,13 @@ all of the interesting logic with zero real sockets or filesystem access.
    `HIGH`.
 5. A short recommendation string is attached based on the level.
 
+The WHOIS domain age is folded in during step 2: younger than
+`scoring.domainAgeNewDays` (30) adds a `domainAgeNew` signal, up to
+`scoring.domainAgeRecentDays` (180, inclusive) adds `domainAgeRecent`, and
+anything older applies the `domainAgeEstablished` weight (`-5` by default)
+without listing it as a signal, since being old isn't a red flag. If the
+lookup fails, the age is `unknown` and contributes nothing either way.
+
 Nothing about step 2-4 is hardcoded in Java - every weight and threshold
 comes from `phishnet-config.yaml` (or a `--config` override), so retuning the
 tool for a stricter or looser environment never requires a rebuild.
@@ -159,6 +173,7 @@ Usage:
 phishnet [-hV] [--config=<path>] (--url=<url> | --email=<file.eml> |
          --batch=<file>) [[--json] [--no-color]] [-v | -q]
          [[--history-file=<path>] [--no-history]] [[--html-report=<path>]]
+         [[--no-whois]]
 
 Analyzes URLs, TLS certificates, and .eml email files for phishing indicators,
 and combines whatever it finds into a single 0-100 risk score with a
@@ -197,6 +212,11 @@ Report options:
       --html-report=<path>   Write a self-contained, styled HTML report of this
                                run's results to <path> (for --batch, written
                                once at the end covering the whole run)
+
+Network options:
+      --no-whois             Skip the live WHOIS domain-age lookup (for
+                               offline/fast scans or CI); domain age is then
+                               left out of the score entirely
 
 Examples:
   phishnet --url https://example.com
@@ -258,6 +278,9 @@ java -jar target/phishnet.jar --url "https://example.com" --no-history
 
 # Write a self-contained HTML report of this run's results
 java -jar target/phishnet.jar --batch urls.txt --html-report scan-report.html
+
+# Offline/fast scan: skip the WHOIS domain-age lookup entirely
+java -jar target/phishnet.jar --batch urls.txt --no-whois
 ```
 
 Output is colored automatically when stdout is a real terminal (HIGH=red, MEDIUM=yellow, LOW=green,
@@ -290,6 +313,34 @@ It respects the other output modes instead of fighting them:
   TTY detection as `--no-color`, since redrawing a line makes no sense outside an interactive
   terminal.
 
+### Domain age (WHOIS)
+
+For every `--url` and `--batch` URL, PhishNet looks up when the URL's
+registrable domain (e.g. `example.com` for `login.example.com`) was
+registered, using a small built-in WHOIS client (plain TCP port 43, no extra
+dependencies). The registry server comes from a built-in table for
+`.com`/`.net`/`.org`/`.uk`, or from an IANA referral (`whois.iana.org`) for
+other TLDs; thin registries' registrar referrals are followed once. Creation
+dates are parsed from the common registry formats (`Creation Date:`,
+`created:`, `Registered on:`, `Registration Time:`, `Created on...:`,
+JPRS `[Created on]`, ...).
+
+```
+Domain Age: 12 days                                                          # default output
+Domain Age: 12 days (12 days, created 2026-09-12, via whois.verisign-grs.com)  # --verbose
+Domain Age: unknown                                                          # lookup failed
+```
+
+- Not shown in `--quiet` mode. IP-address hosts have no domain and are
+  skipped. `.eml` scans don't do WHOIS lookups.
+- A lookup never fails a scan: timeouts, unreachable servers, rate limiting,
+  or unparseable replies all produce `Domain Age: unknown` (the reason shows
+  in `--verbose`), and the score stays neutral.
+- Each lookup has a 5-second total budget. Within a run, results are cached
+  per domain and a server that failed isn't retried, so a large batch can't
+  stall on one slow registry.
+- `--no-whois` turns lookups off completely (offline use, fast scans, CI).
+
 ### Scan history
 
 Every scan appends one row to a CSV history file as a side effect - single
@@ -316,13 +367,19 @@ field):
 | `risk_score` | 0-100 integer |
 | `risk_label` | `LOW`, `MEDIUM`, or `HIGH` |
 | `signals` | semicolon-separated list of the triggered signal ids (empty if none) |
+| `domain_age_days` | WHOIS domain age in days, `unknown` if the lookup failed, empty if no lookup was done (`--no-whois`, IP hosts, emails) |
 
 ```
 $ cat phishnet-history.csv
-timestamp,target,type,risk_score,risk_label,signals
-2026-09-03T19:03:41.036Z,http://paypa1-secure-login.tk/verify?redirect=http://evil.tk/x,URL,70,HIGH,suspiciousTld;typosquatting;nestedRedirect
-2026-09-03T19:03:41.425Z,"https://example.com/path?x=1,2",URL,0,LOW,
+timestamp,target,type,risk_score,risk_label,signals,domain_age_days
+2026-09-03T19:03:41.036Z,http://paypa1-secure-login.tk/verify?redirect=http://evil.tk/x,URL,70,HIGH,suspiciousTld;typosquatting;nestedRedirect,unknown
+2026-09-03T19:03:41.425Z,"https://example.com/path?x=1,2",URL,0,LOW,,11363
 ```
+
+History files created before v1.8.0 have a six-column header. New rows add
+the `domain_age_days` column, so start a fresh file (or add the column to
+the old header) if you load the CSV into a tool that expects a consistent
+column count.
 
 ### HTML report
 
@@ -346,7 +403,7 @@ once per item. The report contains:
 - **Summary**: counts and percentages of LOW/MEDIUM/HIGH results.
 - **Results table**: one row per scanned item - target (URL or `.eml` path),
   type, risk score, a color-coded risk label (green/yellow/red, matching the
-  terminal output's semantics), and the signals that fired for it. Rows are
+  terminal output's semantics), WHOIS domain age, and the signals that fired for it. Rows are
   sorted HIGH risk first, then MEDIUM, then LOW.
 
 If the output path's parent directory doesn't exist, it's created
@@ -422,12 +479,17 @@ scoring:
     homograph: 35
     typosquatting: 30
     # ... one entry per signal id
+    domainAgeNew: 30          # WHOIS age < domainAgeNewDays
+    domainAgeRecent: 15       # domainAgeNewDays <= age <= domainAgeRecentDays
+    domainAgeEstablished: -5  # older; negative = small score reduction (0 to disable)
   mediumThreshold: 30      # score >= this is MEDIUM
   highThreshold: 60        # score >= this is HIGH
   typosquattingMaxDistance: 2
   longUrlThreshold: 75
   maxQueryParams: 8
   encodedCharThreshold: 5
+  domainAgeNewDays: 30
+  domainAgeRecentDays: 180
 ```
 
 The bundled config ships with **71 brands** (banking/finance, tech/email,
@@ -468,17 +530,26 @@ or empty sections (brands, TLDs, weights).
 `mvn test` runs [JaCoCo](https://www.jacoco.org/jacoco/) automatically and
 generates an HTML report at `target/site/jacoco/index.html` - open that file
 in a browser for a line-by-line, package-by-package breakdown. The suite
-(233 tests as of this writing) maintains roughly **90% line / 79% branch**
-coverage overall; the biggest remaining gap is `SslChecker`'s real-socket
-TLS handshake path, which by design isn't exercised without a live network
-connection (its certificate-decision logic in `analyze()` is covered
-separately, with no socket needed).
+(299 tests as of this writing) maintains roughly **90% line / 79% branch**
+coverage overall; the biggest remaining gaps are `SslChecker`'s real-socket
+TLS handshake path and `SocketWhoisClient`'s port-43 I/O, which by design
+aren't exercised without a live network connection (the certificate-decision
+logic and all WHOIS parsing/lookup logic are covered separately, with fake
+data and no sockets).
+
+The default `mvn test` run (and CI) never touches the network. The few
+real-WHOIS smoke tests are tagged `network` and excluded by default; run
+them explicitly with:
+
+```bash
+mvn test -Dgroups=network -DexcludedGroups=none
+```
 
 ## Project layout
 
 ```
 src/main/java/com/phishnet/
-  analyzer/   UrlAnalyzer, SslChecker, EmailAnalyzer
+  analyzer/   UrlAnalyzer, SslChecker, EmailAnalyzer, DomainAgeChecker, WhoisClient, SocketWhoisClient
   model/      Signal, RiskScore, UrlComponents, PhishNetConfig, ...
   scoring/    RiskScorer
   cli/        Main (picocli @Command), ReportFormatter, Reporter, OutputLevel, HistoryWriter, HtmlReportWriter

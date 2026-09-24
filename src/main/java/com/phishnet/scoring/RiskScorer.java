@@ -1,10 +1,13 @@
 package com.phishnet.scoring;
 
+import com.phishnet.model.DomainAgeResult;
 import com.phishnet.model.PhishNetConfig;
 import com.phishnet.model.RiskLevel;
 import com.phishnet.model.RiskScore;
 import com.phishnet.model.Signal;
+import com.phishnet.model.SignalCategory;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -16,6 +19,10 @@ import java.util.List;
  * purpose, so it can be tested with hand-built signal lists.
  */
 public final class RiskScorer {
+
+    public static final String DOMAIN_AGE_NEW = "domainAgeNew";
+    public static final String DOMAIN_AGE_RECENT = "domainAgeRecent";
+    public static final String DOMAIN_AGE_ESTABLISHED = "domainAgeEstablished";
 
     private final PhishNetConfig config;
 
@@ -30,9 +37,50 @@ public final class RiskScorer {
      * RiskLevel via the configured thresholds.
      */
     public RiskScore score(List<Signal> signals) {
+        return score(signals, 0);
+    }
+
+    /**
+     * Like {@link #score(List)}, plus a WHOIS domain age. Relative to the
+     * configured day thresholds (boundaries: {@code age < domainAgeNewDays} is new,
+     * {@code age <= domainAgeRecentDays} is recent):
+     * <ul>
+     *   <li>new: adds a {@code domainAgeNew} signal</li>
+     *   <li>recent: adds a {@code domainAgeRecent} signal</li>
+     *   <li>older: applies the {@code domainAgeEstablished} weight (normally a small
+     *       negative number) without adding a signal - being old isn't a red flag,
+     *       so it shouldn't be listed as one</li>
+     * </ul>
+     * An UNKNOWN or SKIPPED age contributes nothing at all.
+     */
+    public RiskScore score(List<Signal> signals, DomainAgeResult domainAge) {
+        if (domainAge == null || !domainAge.isKnown()) {
+            return score(signals);
+        }
+        var scoring = config.scoring();
+        long age = domainAge.ageDays();
+        String evidence = domainAge.domain() + " created " + domainAge.creationDate();
+
+        List<Signal> combined = new ArrayList<>(signals);
+        if (age < scoring.domainAgeNewDays()) {
+            combined.add(new Signal(DOMAIN_AGE_NEW, SignalCategory.DOMAIN,
+                    "Domain was registered very recently (" + domainAge.formatAge() + " ago)", evidence));
+            return score(combined, 0);
+        }
+        if (age <= scoring.domainAgeRecentDays()) {
+            combined.add(new Signal(DOMAIN_AGE_RECENT, SignalCategory.DOMAIN,
+                    "Domain is relatively new (registered " + domainAge.formatAge() + " ago)", evidence));
+            return score(combined, 0);
+        }
+        // Fallback 0, not the usual 10: a config written before this signal existed
+        // must not start penalizing every well-established domain.
+        return score(combined, scoring.weightOf(DOMAIN_AGE_ESTABLISHED, 0));
+    }
+
+    private RiskScore score(List<Signal> signals, int adjustment) {
         var scoring = config.scoring();
 
-        int total = 0;
+        int total = adjustment;
         for (Signal signal : signals) {
             total += scoring.weightOf(signal.id());
         }

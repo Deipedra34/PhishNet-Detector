@@ -160,4 +160,31 @@ class ConfigLoaderTest {
 
         assertTrue(config.urgencyKeywords().isEmpty());
     }
+
+    @Test
+    void bundledConfigDefinesDomainAgeWeightsAndThresholds() {
+        PhishNetConfig config = ConfigLoader.loadDefault();
+
+        assertTrue(config.scoring().weights().containsKey("domainAgeNew"));
+        assertTrue(config.scoring().weights().containsKey("domainAgeRecent"));
+        assertTrue(config.scoring().weights().containsKey("domainAgeEstablished"));
+        assertTrue(config.scoring().weightOf("domainAgeNew") > config.scoring().weightOf("domainAgeRecent"));
+        assertTrue(config.scoring().weightOf("domainAgeEstablished") <= 0);
+        assertEquals(30, config.scoring().domainAgeNewDays());
+        assertEquals(180, config.scoring().domainAgeRecentDays());
+    }
+
+    @Test
+    void domainAgeThresholdsAreReadFromYamlAndDefaultWhenMissing() {
+        String custom = "scoring:\n  domainAgeNewDays: 14\n  domainAgeRecentDays: 90\n";
+        PhishNetConfig configured = ConfigLoader.load(
+                new ByteArrayInputStream(custom.getBytes(StandardCharsets.UTF_8)));
+        PhishNetConfig defaulted = ConfigLoader.load(
+                new ByteArrayInputStream("brands: []\n".getBytes(StandardCharsets.UTF_8)));
+
+        assertEquals(14, configured.scoring().domainAgeNewDays());
+        assertEquals(90, configured.scoring().domainAgeRecentDays());
+        assertEquals(30, defaulted.scoring().domainAgeNewDays());
+        assertEquals(180, defaulted.scoring().domainAgeRecentDays());
+    }
 }

@@ -192,9 +192,17 @@ scoring:
     urgencyLanguage: 20
     senderMismatch: 25
     riskyEmbeddedLink: 15
+    # Domain age from a live WHOIS lookup (turned off by --no-whois). Newly
+    # registered domains are a strong phishing indicator. If the lookup fails,
+    # the age is "unknown" and none of these apply - scoring stays neutral.
+    domainAgeNew: 30          # younger than domainAgeNewDays
+    domainAgeRecent: 15       # domainAgeNewDays to domainAgeRecentDays days old (inclusive)
+    domainAgeEstablished: -5  # older than domainAgeRecentDays; negative = small score reduction
   mediumThreshold: 30
   highThreshold: 60
   typosquattingMaxDistance: 2
   longUrlThreshold: 75
   maxQueryParams: 8
   encodedCharThreshold: 5
+  domainAgeNewDays: 30
+  domainAgeRecentDays: 180

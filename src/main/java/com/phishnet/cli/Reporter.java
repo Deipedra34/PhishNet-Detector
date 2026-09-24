@@ -1,5 +1,6 @@
 package com.phishnet.cli;
 
+import com.phishnet.model.DomainAgeResult;
 import com.phishnet.model.EmailAnalysisResult;
 import com.phishnet.model.RiskLevel;
 import com.phishnet.model.RiskScore;
@@ -36,11 +37,15 @@ public final class Reporter {
     }
 
     public void reportUrl(String target, UrlAnalysisResult result, RiskScore score) {
+        reportUrl(target, result, score, DomainAgeResult.skipped());
+    }
+
+    public void reportUrl(String target, UrlAnalysisResult result, RiskScore score, DomainAgeResult domainAge) {
         if (level == OutputLevel.QUIET) {
             printQuietLine(target, score);
             return;
         }
-        printSummary(target, score);
+        printSummary(target, score, domainAge);
         if (level == OutputLevel.VERBOSE) {
             printUrlDetails(result.components());
         }
@@ -51,7 +56,7 @@ public final class Reporter {
             printQuietLine(target, score);
             return;
         }
-        printSummary(target, score);
+        printSummary(target, score, DomainAgeResult.skipped());
         if (level == OutputLevel.VERBOSE) {
             printEmailDetails(result);
         }
@@ -62,7 +67,7 @@ public final class Reporter {
             printQuietLine(entry.label(), entry.score());
             return;
         }
-        printSummary(entry.label(), entry.score());
+        printSummary(entry.label(), entry.score(), entry.domainAge());
         out.println("---");
     }
 
@@ -75,9 +80,10 @@ public final class Reporter {
 
     // --- summary block, shared by NORMAL and VERBOSE ------------------------
 
-    private void printSummary(String target, RiskScore score) {
+    private void printSummary(String target, RiskScore score, DomainAgeResult domainAge) {
         out.println("Target: " + target);
         out.println("Risk Score: " + score.score() + "/100 (" + coloredLevel(score.level()) + ")");
+        printDomainAge(domainAge);
 
         if (score.signals().isEmpty()) {
             out.println(AnsiColor.apply("✓", colorEnabled, AnsiColor.GREEN) + " No phishing indicators detected");
@@ -96,6 +102,27 @@ public final class Reporter {
             }
         }
         out.println("Recommendation: " + score.recommendation());
+    }
+
+    /**
+     * "Domain Age: 3 months" (NORMAL) or with days/creation date/server appended
+     * (VERBOSE). A failed lookup prints "unknown" (plus the reason in VERBOSE);
+     * a skipped one (--no-whois, IP host) prints nothing.
+     */
+    private void printDomainAge(DomainAgeResult domainAge) {
+        if (domainAge == null || domainAge.isSkipped()) {
+            return;
+        }
+        StringBuilder line = new StringBuilder("Domain Age: ").append(domainAge.formatAge());
+        if (level == OutputLevel.VERBOSE) {
+            if (domainAge.isKnown()) {
+                line.append(" (").append(domainAge.ageDays()).append(" days, created ")
+                        .append(domainAge.creationDate()).append(", via ").append(domainAge.whoisServer()).append(")");
+            } else if (!domainAge.reason().isEmpty()) {
+                line.append(" (").append(domainAge.reason()).append(")");
+            }
+        }
+        out.println(line);
     }
 
     private void printUrlDetails(UrlComponents c) {

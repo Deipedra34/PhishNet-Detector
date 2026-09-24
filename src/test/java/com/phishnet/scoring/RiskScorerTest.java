@@ -1,5 +1,6 @@
 package com.phishnet.scoring;
 
+import com.phishnet.model.DomainAgeResult;
 import com.phishnet.model.PhishNetConfig;
 import com.phishnet.model.PhishNetConfig.ScoringConfig;
 import com.phishnet.model.RiskLevel;
@@ -8,6 +9,7 @@ import com.phishnet.model.Signal;
 import com.phishnet.model.SignalCategory;
 import org.junit.jupiter.api.Test;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 
@@ -167,5 +169,107 @@ class RiskScorerTest {
         RiskScore result = scorer.score(List.of(signal));
 
         assertEquals(List.of(signal), result.signals());
+    }
+
+    // --- domain age signal ----------------------------------------------------
+
+    private static final Map<String, Integer> AGE_WEIGHTS = Map.of(
+            "domainAgeNew", 30, "domainAgeRecent", 15, "domainAgeEstablished", -5, "suspiciousTld", 20);
+
+    private static RiskScore scoreWithAge(long ageDays, Signal... otherSignals) {
+        RiskScorer scorer = new RiskScorer(configWithWeights(AGE_WEIGHTS, 30, 60));
+        DomainAgeResult age = DomainAgeResult.known("example.com",
+                LocalDate.of(2026, 9, 24).minusDays(ageDays), ageDays, "whois.test");
+        return scorer.score(List.of(otherSignals), age);
+    }
+
+    private static List<String> ids(RiskScore score) {
+        return score.signals().stream().map(Signal::id).toList();
+    }
+
+    @Test
+    void domainAge29DaysIsNew() {
+        RiskScore result = scoreWithAge(29);
+        assertEquals(30, result.score());
+        assertEquals(List.of("domainAgeNew"), ids(result));
+    }
+
+    @Test
+    void domainAge30DaysIsRecentNotNew() {
+        RiskScore result = scoreWithAge(30);
+        assertEquals(15, result.score());
+        assertEquals(List.of("domainAgeRecent"), ids(result));
+    }
+
+    @Test
+    void domainAge180DaysIsStillRecent() {
+        RiskScore result = scoreWithAge(180);
+        assertEquals(15, result.score());
+        assertEquals(List.of("domainAgeRecent"), ids(result));
+    }
+
+    @Test
+    void domainAge181DaysIsEstablishedAndReducesScoreWithoutASignal() {
+        RiskScore result = scoreWithAge(181, new Signal("suspiciousTld", SignalCategory.URL, "tld"));
+        assertEquals(15, result.score()); // 20 - 5
+        assertEquals(List.of("suspiciousTld"), ids(result));
+    }
+
+    @Test
+    void domainAgeZeroDaysIsNew() {
+        assertEquals(List.of("domainAgeNew"), ids(scoreWithAge(0)));
+    }
+
+    @Test
+    void establishedReductionNeverTakesScoreBelowZero() {
+        RiskScore result = scoreWithAge(5000);
+        assertEquals(0, result.score());
+        assertEquals(RiskLevel.LOW, result.level());
+        assertTrue(result.signals().isEmpty());
+    }
+
+    @Test
+    void newDomainSignalStacksWithOtherSignals() {
+        RiskScore result = scoreWithAge(3, new Signal("suspiciousTld", SignalCategory.URL, "tld"));
+        assertEquals(50, result.score());
+        assertEquals(RiskLevel.MEDIUM, result.level());
+        assertEquals(List.of("suspiciousTld", "domainAgeNew"), ids(result));
+        assertEquals(SignalCategory.DOMAIN, result.signals().get(1).category());
+    }
+
+    @Test
+    void unknownOrSkippedDomainAgeIsNeutral() {
+        RiskScorer scorer = new RiskScorer(configWithWeights(AGE_WEIGHTS, 30, 60));
+        List<Signal> signals = List.of(new Signal("suspiciousTld", SignalCategory.URL, "tld"));
+
+        RiskScore unknown = scorer.score(signals, DomainAgeResult.unknown("example.com", "WHOIS lookup timed out"));
+        RiskScore skipped = scorer.score(signals, DomainAgeResult.skipped());
+        RiskScore nullAge = scorer.score(signals, null);
+
+        assertEquals(20, unknown.score());
+        assertEquals(20, skipped.score());
+        assertEquals(20, nullAge.score());
+        assertEquals(List.of("suspiciousTld"), ids(unknown));
+    }
+
+    @Test
+    void domainAgeThresholdsComeFromConfig() {
+        ScoringConfig scoring = new ScoringConfig(AGE_WEIGHTS, 30, 60, 2, 75, 8, 5, 7, 60);
+        RiskScorer scorer = new RiskScorer(new PhishNetConfig(List.of(), List.of(), List.of(), Map.of(), scoring));
+        LocalDate today = LocalDate.of(2026, 9, 24);
+
+        assertEquals(List.of("domainAgeRecent"), ids(scorer.score(List.of(),
+                DomainAgeResult.known("a.com", today.minusDays(7), 7, "s"))));
+        assertEquals(List.of(), ids(scorer.score(List.of(),
+                DomainAgeResult.known("a.com", today.minusDays(61), 61, "s"))));
+    }
+
+    @Test
+    void configWithoutEstablishedWeightDoesNotPenalizeOldDomains() {
+        RiskScorer scorer = new RiskScorer(configWithWeights(Map.of("suspiciousTld", 20), 30, 60));
+        RiskScore result = scorer.score(List.of(new Signal("suspiciousTld", SignalCategory.URL, "tld")),
+                DomainAgeResult.known("a.com", LocalDate.of(2000, 1, 1), 9000, "s"));
+
+        assertEquals(20, result.score());
     }
 }

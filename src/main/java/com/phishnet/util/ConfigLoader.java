@@ -89,9 +89,12 @@ public final class ConfigLoader {
         int longUrlThreshold = intValue(scoringMap.get("longUrlThreshold"), 75);
         int maxQueryParams = intValue(scoringMap.get("maxQueryParams"), 8);
         int encodedCharThreshold = intValue(scoringMap.get("encodedCharThreshold"), 5);
+        int domainAgeNewDays = intValue(scoringMap.get("domainAgeNewDays"), 30);
+        int domainAgeRecentDays = intValue(scoringMap.get("domainAgeRecentDays"), 180);
 
         ScoringConfig scoring = new ScoringConfig(weights, mediumThreshold, highThreshold,
-                typosquattingMaxDistance, longUrlThreshold, maxQueryParams, encodedCharThreshold);
+                typosquattingMaxDistance, longUrlThreshold, maxQueryParams, encodedCharThreshold,
+                domainAgeNewDays, domainAgeRecentDays);
 
         return new PhishNetConfig(brands, suspiciousTlds, urlShorteners, urgencyKeywords, scoring);
     }

@@ -1,6 +1,7 @@
 package com.phishnet.cli;
 
 import com.phishnet.analyzer.UrlAnalyzer;
+import com.phishnet.model.DomainAgeResult;
 import com.phishnet.model.EmailAnalysisResult;
 import com.phishnet.model.RiskLevel;
 import com.phishnet.model.RiskScore;
@@ -14,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -243,5 +245,61 @@ class ReporterTest {
         reporter.reportBatchSummary(3, 1, 1);
 
         assertTrue(buffer.toString(StandardCharsets.UTF_8).contains("Summary: 3 URL(s) analyzed - 1 high risk, 1 medium risk"));
+    }
+
+    // --- domain age ------------------------------------------------------------
+
+    private static final DomainAgeResult TEN_DAYS_OLD =
+            DomainAgeResult.known("example.com", LocalDate.of(2026, 9, 14), 10, "whois.verisign-grs.com");
+    private static final DomainAgeResult TIMED_OUT =
+            DomainAgeResult.unknown("example.com", "WHOIS lookup timed out");
+
+    private String reportWithAge(OutputLevel level, DomainAgeResult age) {
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        new Reporter(capture(buffer), level, false)
+                .reportUrl("https://example.com", urlAnalyzer.analyze("https://example.com"), highScore(), age);
+        return buffer.toString(StandardCharsets.UTF_8);
+    }
+
+    @Test
+    void normalShowsDomainAge() {
+        String out = reportWithAge(OutputLevel.NORMAL, TEN_DAYS_OLD);
+        assertTrue(out.contains("Domain Age: 10 days" + System.lineSeparator()), out);
+    }
+
+    @Test
+    void verboseShowsDomainAgeWithCreationDateAndServer() {
+        String out = reportWithAge(OutputLevel.VERBOSE, TEN_DAYS_OLD);
+        assertTrue(out.contains("Domain Age: 10 days (10 days, created 2026-09-14, via whois.verisign-grs.com)"), out);
+    }
+
+    @Test
+    void unknownDomainAgeShowsUnknownAndReasonOnlyInVerbose() {
+        String normal = reportWithAge(OutputLevel.NORMAL, TIMED_OUT);
+        String verbose = reportWithAge(OutputLevel.VERBOSE, TIMED_OUT);
+
+        assertTrue(normal.contains("Domain Age: unknown" + System.lineSeparator()), normal);
+        assertTrue(verbose.contains("Domain Age: unknown (WHOIS lookup timed out)"), verbose);
+    }
+
+    @Test
+    void quietNeverShowsDomainAge() {
+        String out = reportWithAge(OutputLevel.QUIET, TEN_DAYS_OLD);
+        assertFalse(out.contains("Domain Age"));
+        assertEquals("HIGH 87 https://example.com", out.strip());
+    }
+
+    @Test
+    void skippedDomainAgePrintsNothing() {
+        assertFalse(reportWithAge(OutputLevel.VERBOSE, DomainAgeResult.skipped()).contains("Domain Age"));
+    }
+
+    @Test
+    void batchEntryShowsItsDomainAge() {
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        new Reporter(capture(buffer), OutputLevel.NORMAL, false).reportBatchEntry(
+                new AnalysisEntry("https://example.com", highScore(), HistoryWriter.TargetType.URL, TEN_DAYS_OLD));
+
+        assertTrue(buffer.toString(StandardCharsets.UTF_8).contains("Domain Age: 10 days"));
     }
 }

@@ -61,10 +61,19 @@ public final class PhishNetConfig {
         private final int longUrlThreshold;
         private final int maxQueryParams;
         private final int encodedCharThreshold;
+        private final int domainAgeNewDays;
+        private final int domainAgeRecentDays;
 
         public ScoringConfig(Map<String, Integer> weights, int mediumThreshold, int highThreshold,
                               int typosquattingMaxDistance, int longUrlThreshold, int maxQueryParams,
                               int encodedCharThreshold) {
+            this(weights, mediumThreshold, highThreshold, typosquattingMaxDistance, longUrlThreshold,
+                    maxQueryParams, encodedCharThreshold, 30, 180);
+        }
+
+        public ScoringConfig(Map<String, Integer> weights, int mediumThreshold, int highThreshold,
+                              int typosquattingMaxDistance, int longUrlThreshold, int maxQueryParams,
+                              int encodedCharThreshold, int domainAgeNewDays, int domainAgeRecentDays) {
             this.weights = Collections.unmodifiableMap(weights);
             this.mediumThreshold = mediumThreshold;
             this.highThreshold = highThreshold;
@@ -72,6 +81,8 @@ public final class PhishNetConfig {
             this.longUrlThreshold = longUrlThreshold;
             this.maxQueryParams = maxQueryParams;
             this.encodedCharThreshold = encodedCharThreshold;
+            this.domainAgeNewDays = domainAgeNewDays;
+            this.domainAgeRecentDays = domainAgeRecentDays;
         }
 
         public Map<String, Integer> weights() {
@@ -105,8 +116,26 @@ public final class PhishNetConfig {
             return encodedCharThreshold;
         }
 
+        /** A domain younger than this many days raises {@code domainAgeNew}. */
+        public int domainAgeNewDays() {
+            return domainAgeNewDays;
+        }
+
+        /**
+         * A domain at least {@link #domainAgeNewDays()} old but no older than this many
+         * days raises {@code domainAgeRecent}; anything older counts as established.
+         */
+        public int domainAgeRecentDays() {
+            return domainAgeRecentDays;
+        }
+
         public int weightOf(String signalId) {
-            return weights.getOrDefault(signalId, 10);
+            return weightOf(signalId, 10);
+        }
+
+        /** Like {@link #weightOf(String)}, but with an explicit fallback for ids missing from the config. */
+        public int weightOf(String signalId, int fallback) {
+            return weights.getOrDefault(signalId, fallback);
         }
     }
 }
