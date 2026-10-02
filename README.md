@@ -1,5 +1,7 @@
 # PhishNet Detector
 
+[![CI](https://github.com/Deipedra34/PhishNet-Detector/actions/workflows/ci.yml/badge.svg)](https://github.com/Deipedra34/PhishNet-Detector/actions/workflows/ci.yml)
+
 <p align="center">
   <img src="assets/banner.svg" alt="PhishNet Detector banner" width="100%">
 </p>

@@ -1,0 +1,40 @@
+name: CI
+
+# Run the full build and test suite on every push and PR to main.
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # The project targets Java 26 (see maven.compiler.* in pom.xml).
+      # setup-java's built-in cache keys off the pom.xml hashes.
+      - name: Set up JDK 26
+        uses: actions/setup-java@v4
+        with:
+          java-version: '26'
+          distribution: 'temurin'
+          cache: maven
+
+      # verify runs the unit tests and the JaCoCo coverage report (network-tagged
+      # tests are excluded by default via pom.xml). A test failure fails the job.
+      - name: Build and test
+        run: mvn -B clean verify
+
+      # Publish the coverage report so it can be downloaded from the run summary.
+      # always() keeps the upload even when tests fail, so failures are debuggable.
+      - name: Upload JaCoCo coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-coverage-report
+          path: target/site/jacoco/
+          if-no-files-found: ignore
