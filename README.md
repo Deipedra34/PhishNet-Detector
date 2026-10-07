@@ -804,7 +804,7 @@ or empty sections (brands, TLDs, weights).
 `mvn test` runs [JaCoCo](https://www.jacoco.org/jacoco/) automatically and
 generates an HTML report at `target/site/jacoco/index.html` - open that file
 in a browser for a line-by-line, package-by-package breakdown. The suite
-(320 tests as of this writing) maintains roughly **90% line / 79% branch**
+(323 tests as of this writing) maintains roughly **90% line / 79% branch**
 coverage overall; the biggest remaining gaps are `SslChecker`'s real-socket
 TLS handshake path and `SocketWhoisClient`'s port-43 I/O, which by design
 aren't exercised without a live network connection (the certificate-decision

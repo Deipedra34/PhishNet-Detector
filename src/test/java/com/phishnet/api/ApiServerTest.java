@@ -272,16 +272,66 @@ class ApiServerTest {
                 400, "empty");
     }
 
-    @Test
-    void oversizedRequestsAreRejected() throws Exception {
-        startServer();
-        byte[] huge = new byte[(int) ApiServer.MAX_REQUEST_BYTES + 1024];
-        Arrays.fill(huge, (byte) 'a');
+    // The size-limit tests use a 1 KB limit and 4 KB bodies rather than the real 5 MB:
+    // a small rejected body arrives in full straight away, so the server can drain it
+    // and answer cleanly. With megabytes still in flight, the server closing the
+    // connection early can reset it before the client reads the 413 (notably on Linux).
+    private static final int SMALL_LIMIT = 1024;
 
-        assertError(postMultipart("/api/scan/email", ApiServer.EMAIL_UPLOAD_FIELD, "huge.eml", huge),
+    private void startServerWithSmallLimit() {
+        ScanService scanner = new ScanService(PhishNetConfig.defaultConfig(), null);
+        server = new ApiServer(scanner, new PrintStream(serverLog, true, StandardCharsets.UTF_8), SMALL_LIMIT)
+                .start(0);
+    }
+
+    private static String oversizedText() {
+        char[] chars = new char[SMALL_LIMIT * 4];
+        Arrays.fill(chars, 'a');
+        return new String(chars);
+    }
+
+    /** POSTs without a Content-Length header (chunked), so only the streaming limit can catch it. */
+    private Response postChunked(String path, String contentType, byte[] body) throws IOException, InterruptedException {
+        return send(HttpRequest.newBuilder(uri(path))
+                .header("Content-Type", contentType)
+                .POST(HttpRequest.BodyPublishers.ofInputStream(() -> new java.io.ByteArrayInputStream(body)))
+                .build());
+    }
+
+    @Test
+    void defaultRequestLimitIsFiveMegabytes() {
+        assertEquals(5L * 1024 * 1024, ApiServer.MAX_REQUEST_BYTES);
+    }
+
+    @Test
+    void oversizedRequestsWithDeclaredLengthAreRejected() throws Exception {
+        startServerWithSmallLimit();
+        String big = oversizedText();
+
+        assertError(postJson("/api/scan/email", MAPPER.writeValueAsString(Map.of("raw", big))),
+                413, "too large (max 1024 bytes)");
+        assertError(postMultipart("/api/scan/email", ApiServer.EMAIL_UPLOAD_FIELD, "huge.eml",
+                big.getBytes(StandardCharsets.US_ASCII)), 413, "too large");
+        assertError(postJson("/api/scan/url", MAPPER.writeValueAsString(Map.of("url", "https://x.com/" + big))),
                 413, "too large");
-        assertError(postJson("/api/scan/email", "{\"raw\":\"" + new String(huge, StandardCharsets.US_ASCII) + "\"}"),
-                413, "too large");
+    }
+
+    @Test
+    void oversizedChunkedRequestsAreRejected() throws Exception {
+        startServerWithSmallLimit();
+        String big = oversizedText();
+
+        byte[] json = MAPPER.writeValueAsBytes(Map.of("raw", big));
+        assertError(postChunked("/api/scan/email", "application/json", json), 413, "too large");
+    }
+
+    @Test
+    void requestsWithinLimitStillWork() throws Exception {
+        startServerWithSmallLimit();
+
+        Response response = postJson("/api/scan/url", "{\"url\":\"https://bit.ly/xyz\"}");
+
+        assertEquals(200, response.status());
     }
 
     // --- routing / error shape -------------------------------------------------

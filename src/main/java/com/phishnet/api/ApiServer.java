@@ -40,10 +40,8 @@ public final class ApiServer {
 
     public static final int DEFAULT_PORT = 8080;
 
-    /** Largest request body accepted on any endpoint (JSON or multipart), in MB. */
-    static final int MAX_REQUEST_MB = 5;
-    static final long MAX_REQUEST_BYTES = MAX_REQUEST_MB * 1024L * 1024L;
-    private static final String TOO_LARGE_MESSAGE = "Request body too large (max " + MAX_REQUEST_MB + " MB)";
+    /** Largest request body accepted on any endpoint (JSON or multipart) by default: 5 MB. */
+    static final long MAX_REQUEST_BYTES = 5L * 1024 * 1024;
 
     /** Longest URL accepted by /api/scan/url - far beyond any real link, but rules out abuse. */
     static final int MAX_URL_LENGTH = 8192;
@@ -53,6 +51,8 @@ public final class ApiServer {
 
     private final ScanService scanner;
     private final PrintStream log;
+    private final long maxRequestBytes;
+    private final String tooLargeMessage;
     private final ObjectMapper mapper = new ObjectMapper();
     private final Javalin app;
 
@@ -60,8 +60,15 @@ public final class ApiServer {
      * @param log where unexpected (500) errors are reported, with their stack trace
      */
     public ApiServer(ScanService scanner, PrintStream log) {
+        this(scanner, log, MAX_REQUEST_BYTES);
+    }
+
+    /** Same, with a custom request-size limit (lets tests exercise the limit with small bodies). */
+    ApiServer(ScanService scanner, PrintStream log, long maxRequestBytes) {
         this.scanner = scanner;
         this.log = log;
+        this.maxRequestBytes = maxRequestBytes;
+        this.tooLargeMessage = "Request body too large (max " + describeSize(maxRequestBytes) + ")";
         this.app = Javalin.create(this::configure);
     }
 
@@ -88,16 +95,16 @@ public final class ApiServer {
 
         // Applies to ctx.body()/bodyAsBytes(), which stop reading and fail with 413
         // as soon as a body crosses the limit, even with no Content-Length header.
-        config.http.maxRequestSize = MAX_REQUEST_BYTES;
+        config.http.maxRequestSize = maxRequestBytes;
         // Multipart uploads bypass maxRequestSize, so cap them separately. Keeping the
         // whole (capped) upload in memory means nothing is ever spooled to disk.
-        config.jetty.multipartConfig.maxFileSize(MAX_REQUEST_MB, SizeUnit.MB);
-        config.jetty.multipartConfig.maxTotalRequestSize(MAX_REQUEST_MB, SizeUnit.MB);
-        config.jetty.multipartConfig.maxInMemoryFileSize(MAX_REQUEST_MB, SizeUnit.MB);
+        config.jetty.multipartConfig.maxFileSize(maxRequestBytes, SizeUnit.BYTES);
+        config.jetty.multipartConfig.maxTotalRequestSize(maxRequestBytes, SizeUnit.BYTES);
+        config.jetty.multipartConfig.maxInMemoryFileSize((int) maxRequestBytes, SizeUnit.BYTES);
 
         // Reject a declared-oversized body up front, before reading any of it.
         config.routes.before("/api/*", ctx -> {
-            if (ctx.req().getContentLengthLong() > MAX_REQUEST_BYTES) {
+            if (ctx.req().getContentLengthLong() > maxRequestBytes) {
                 throw tooLarge();
             }
         });
@@ -110,7 +117,7 @@ public final class ApiServer {
         config.routes.exception(HttpResponseException.class, (e, ctx) -> {
             HttpStatus status = HttpStatus.forStatus(e.getStatus());
             // Javalin's own body-limit 413 just says "Content Too Large"; say what the limit is.
-            String message = status == HttpStatus.CONTENT_TOO_LARGE ? TOO_LARGE_MESSAGE : e.getMessage();
+            String message = status == HttpStatus.CONTENT_TOO_LARGE ? tooLargeMessage : e.getMessage();
             respondError(ctx, status, message);
         });
         config.routes.exception(Exception.class, (e, ctx) -> {
@@ -156,7 +163,7 @@ public final class ApiServer {
             // limits by throwing (a checked ServletException, despite no throws clause
             // on the Kotlin side) while parsing it; neither is a server-side fault.
             throw new BadRequestResponse("Could not read multipart upload (malformed, or larger than "
-                    + MAX_REQUEST_MB + " MB)");
+                    + describeSize(maxRequestBytes) + ")");
         }
         if (file == null) {
             throw new BadRequestResponse("Multipart request must include the .eml file in a form field named '"
@@ -200,8 +207,14 @@ public final class ApiServer {
         return text;
     }
 
-    private static HttpResponseException tooLarge() {
-        return new HttpResponseException(HttpStatus.CONTENT_TOO_LARGE.getCode(), TOO_LARGE_MESSAGE);
+    private HttpResponseException tooLarge() {
+        return new HttpResponseException(HttpStatus.CONTENT_TOO_LARGE.getCode(), tooLargeMessage);
+    }
+
+    /** "5 MB" for whole megabytes, otherwise an exact byte count. */
+    private static String describeSize(long bytes) {
+        long mb = 1024L * 1024L;
+        return bytes % mb == 0 ? (bytes / mb) + " MB" : bytes + " bytes";
     }
 
     // --- responses -------------------------------------------------------------
