@@ -57,7 +57,12 @@ public final class ReportFormatter {
         return writeJson(asMaps);
     }
 
-    private static Map<String, Object> toMap(String label, RiskScore score) {
+    /**
+     * The JSON structure for one result (target, score, level, recommendation, signals),
+     * as a mutable ordered map. Public so the REST API can build on the exact same
+     * shape the --json flag prints, adding its own fields on top.
+     */
+    public static Map<String, Object> toMap(String label, RiskScore score) {
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("target", label);
         root.put("score", score.score());

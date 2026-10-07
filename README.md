@@ -14,6 +14,10 @@ label and a plain-language recommendation.
 Everything that can be tuned - the brand list, suspicious TLDs, urgency
 keywords, and scoring weights - lives in a YAML config file, not in the code.
 
+It runs as a command-line tool by default, and can optionally run as a small
+JSON REST API server (`phishnet serve`) exposing the same URL and email
+scanning over HTTP - see [REST API (serve mode)](#rest-api-serve-mode).
+
 ## Contents
 
 - [What it detects](#what-it-detects)
@@ -21,6 +25,7 @@ keywords, and scoring weights - lives in a YAML config file, not in the code.
 - [How scoring works](#how-scoring-works)
 - [Setup](#setup)
 - [Usage](#usage)
+- [REST API (serve mode)](#rest-api-serve-mode)
 - [Configuration](#configuration)
 - [Testing](#testing)
 - [Project layout](#project-layout)
@@ -124,6 +129,12 @@ network-free `analyze()`; `EmailAnalyzer` and `UrlAnalyzer` operate on
 already-supplied streams/strings). That's what lets the test suite exercise
 all of the interesting logic with zero real sockets or filesystem access.
 
+The optional REST API (`phishnet serve`) is a second front end over that same
+pipeline, not a parallel implementation: `ApiServer` (Javalin) only parses and
+validates HTTP input, and `ScanService` calls the exact same `UrlAnalyzer` /
+`DomainAgeChecker` / `EmailAnalyzer` / `RiskScorer` sequence the CLI does,
+reusing `ReportFormatter`'s JSON structure for its responses.
+
 ## How scoring works
 
 1. Every analyzer run produces a `List<Signal>`, each with a stable id such
@@ -224,13 +235,14 @@ Examples:
   phishnet --url https://example.com
   phishnet --email suspicious.eml --verbose
   phishnet --batch urls.txt --json
+  phishnet serve --port 8080   (REST API mode; see: phishnet serve --help)
 
 See the project README for the full option reference and sample output.
 ```
 
 ```
 $ java -jar target/phishnet.jar --version
-phishnet 1.0.0
+phishnet 2.0.0
 ```
 
 `--version` always reflects the version actually built (Maven filters it into
@@ -463,6 +475,262 @@ $ java -jar target/phishnet.jar --batch urls.txt
 Summary: 10 URL(s) analyzed - 0 high risk, 6 medium risk
 ```
 
+## REST API (serve mode)
+
+`phishnet serve` starts an embedded HTTP server ([Javalin](https://javalin.io),
+on Jetty) that exposes the scanner as a JSON API, for integrating PhishNet into
+other services, mail pipelines, or uptime-monitored deployments. It's purely
+additive: without `serve`, the tool is the same CLI described above.
+
+```bash
+# Default port 8080
+java -jar target/phishnet.jar serve
+
+# Custom port, custom config, no live WHOIS lookups
+java -jar target/phishnet.jar serve --port 9090 --config my-config.yaml --no-whois
+```
+
+```
+$ java -jar target/phishnet.jar serve
+2026-10-07 23:16:17 INFO io.javalin.Javalin - Starting Javalin ...
+2026-10-07 23:16:17 INFO io.javalin.Javalin - Javalin started in 220ms \o/
+2026-10-07 23:16:17 INFO io.javalin.Javalin - Listening on http://localhost:8080/
+2026-10-07 23:16:17 INFO io.javalin.Javalin - You are running Javalin 7.2.3 (released August 11, 2026).
+PhishNet API listening on http://localhost:8080 (Ctrl+C to stop)
+  GET  /api/health
+  POST /api/scan/url
+  POST /api/scan/email
+```
+
+| Option | Meaning |
+| --- | --- |
+| `--port <port>` | TCP port to listen on (default `8080`; `0` picks a free port) |
+| `--config <path>` | Use a custom YAML config instead of the bundled default (same as the CLI) |
+| `--no-whois` | Skip the live WHOIS domain-age lookup for URL scans (same as the CLI) |
+
+The server runs until stopped with Ctrl+C (or SIGTERM), which shuts it down
+cleanly. Exit code `2` means a bad option (e.g. an out-of-range port), `1`
+means the config couldn't be loaded or the port couldn't be bound.
+
+### Endpoints
+
+| Method | Path | Request | Response |
+| --- | --- | --- | --- |
+| `GET` | `/api/health` | - | `{"status":"ok"}` |
+| `POST` | `/api/scan/url` | JSON `{"url": "..."}` | URL scan result |
+| `POST` | `/api/scan/email` | multipart upload of a `.eml` file in form field `file`, **or** JSON `{"raw": "<full email source>"}` | email scan result |
+
+Every scan result has the same core fields as the CLI's `--json` output -
+`target`, `score` (0-100), `level` (`LOW`/`MEDIUM`/`HIGH`), `recommendation`,
+and `signals` (each with `id`, `category`, `description`, `evidence`) - plus a
+`type` (`URL` or `EMAIL`) and type-specific details:
+
+- URL scans add `domainAge`: `status` is `KNOWN` (with `domain`,
+  `creationDate`, `ageDays`, a human-readable `age`, and `whoisServer`),
+  `UNKNOWN` (lookup failed; with `domain` and `reason`), or `SKIPPED` (no
+  lookup: `--no-whois` or an IP-address host).
+- Email scans add `email`: `from`, `displayName`, `replyTo`, `subject`, and
+  the embedded `links` that were analyzed.
+
+#### `GET /api/health`
+
+```bash
+curl http://localhost:8080/api/health
+```
+
+```json
+{
+  "status": "ok"
+}
+```
+
+#### `POST /api/scan/url`
+
+```bash
+curl -X POST http://localhost:8080/api/scan/url \
+  -H "Content-Type: application/json" \
+  -d '{"url": "http://paypa1-secure-login.tk/verify?redirect=http://evil.tk/x"}'
+```
+
+```json
+{
+  "target": "http://paypa1-secure-login.tk/verify?redirect=http://evil.tk/x",
+  "type": "URL",
+  "score": 70,
+  "level": "HIGH",
+  "recommendation": "High risk of phishing. Do not click any links, enter credentials, or open attachments. Report and delete.",
+  "signals": [
+    {
+      "id": "suspiciousTld",
+      "category": "URL",
+      "description": "URL uses a TLD commonly abused for phishing",
+      "evidence": ".tk"
+    },
+    {
+      "id": "typosquatting",
+      "category": "URL",
+      "description": "Domain segment 'paypa1' closely resembles brand 'paypal' (edit distance 1)",
+      "evidence": "paypa1-secure-login.tk"
+    },
+    {
+      "id": "nestedRedirect",
+      "category": "URL",
+      "description": "URL appears to embed another URL in its query string, a common open-redirect phishing pattern",
+      "evidence": ""
+    }
+  ],
+  "domainAge": {
+    "status": "UNKNOWN",
+    "domain": "paypa1-secure-login.tk",
+    "reason": "WHOIS lookup timed out"
+  }
+}
+```
+
+With a successful WHOIS lookup, `domainAge` carries the registration details:
+
+```bash
+curl -X POST http://localhost:8080/api/scan/url \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://github.com/login"}'
+```
+
+```json
+{
+  "target": "https://github.com/login",
+  "type": "URL",
+  "score": 0,
+  "level": "LOW",
+  "recommendation": "No strong phishing indicators found. Still verify anything requesting credentials or payment before acting on it.",
+  "signals": [],
+  "domainAge": {
+    "status": "KNOWN",
+    "domain": "github.com",
+    "creationDate": "2007-10-09",
+    "ageDays": 6938,
+    "age": "18 years",
+    "whoisServer": "whois.verisign-grs.com"
+  }
+}
+```
+
+#### `POST /api/scan/email` - `.eml` file upload
+
+```bash
+curl -X POST http://localhost:8080/api/scan/email \
+  -F "file=@suspicious.eml"
+```
+
+```json
+{
+  "target": "suspicious.eml",
+  "type": "EMAIL",
+  "score": 25,
+  "level": "LOW",
+  "recommendation": "No strong phishing indicators found. Still verify anything requesting credentials or payment before acting on it.",
+  "signals": [
+    {
+      "id": "senderMismatch",
+      "category": "EMAIL",
+      "description": "Display name references brand 'paypal' but sender address domain does not match",
+      "evidence": "PayPal Security <alert@random-mailer.info>"
+    }
+  ],
+  "email": {
+    "from": "alert@random-mailer.info",
+    "displayName": "PayPal Security",
+    "replyTo": "alert@random-mailer.info",
+    "subject": "Account Alert",
+    "links": []
+  }
+}
+```
+
+#### `POST /api/scan/email` - raw email text as JSON
+
+```bash
+curl -X POST http://localhost:8080/api/scan/email \
+  -H "Content-Type: application/json" \
+  -d '{"raw": "From: \"PayPal\" <alert@random-mailer.info>\nTo: victim@example.com\nSubject: Verify immediately\n\nYour account will be suspended. Verify immediately: http://192.168.1.1/login\n"}'
+```
+
+```json
+{
+  "target": "raw email",
+  "type": "EMAIL",
+  "score": 85,
+  "level": "HIGH",
+  "recommendation": "High risk of phishing. Do not click any links, enter credentials, or open attachments. Report and delete.",
+  "signals": [
+    {
+      "id": "urgencyLanguage",
+      "category": "EMAIL",
+      "description": "Message uses urgency/threat language typical of phishing",
+      "evidence": "[en] your account will be suspended"
+    },
+    {
+      "id": "senderMismatch",
+      "category": "EMAIL",
+      "description": "Display name references brand 'paypal' but sender address domain does not match",
+      "evidence": "PayPal <alert@random-mailer.info>"
+    },
+    {
+      "id": "riskyEmbeddedLink",
+      "category": "EMAIL",
+      "description": "Embedded link triggered its own risk signals",
+      "evidence": "http://192.168.1.1/login"
+    },
+    {
+      "id": "ipAddressHost",
+      "category": "URL",
+      "description": "URL uses a raw IP address instead of a domain name",
+      "evidence": "192.168.1.1"
+    }
+  ],
+  "email": {
+    "from": "alert@random-mailer.info",
+    "displayName": "PayPal",
+    "replyTo": "alert@random-mailer.info",
+    "subject": "Verify immediately",
+    "links": [
+      "http://192.168.1.1/login"
+    ]
+  }
+}
+```
+
+### Errors and limits
+
+Every error response is JSON of the form `{"error": "message"}` - internal
+details and stack traces are only ever written to the server's own log
+(stderr), never sent to the client.
+
+| Status | When |
+| --- | --- |
+| `200` | Scan completed (whatever the risk level) |
+| `400` | Missing, empty, or malformed input: empty body, invalid JSON, a body that isn't a JSON object, missing/empty/non-string `url` or `raw`, a URL over 8192 characters, a multipart request without a `file` field, an empty uploaded file, or an unreadable multipart body |
+| `404` / `405` | Unknown path, or wrong HTTP method for a known path |
+| `413` | Request body larger than 5 MB |
+| `500` | Unexpected internal failure (`{"error": "Internal server error"}`) |
+
+```bash
+$ curl -i -X POST http://localhost:8080/api/scan/url -H "Content-Type: application/json" -d '{}'
+HTTP/1.1 400 Bad Request
+...
+{"error":"Missing required field 'url'"}
+```
+
+Notes:
+
+- Request bodies (JSON or multipart) are capped at **5 MB**; oversized bodies
+  are rejected without being buffered in full.
+- API scans are stateless: they are **not** written to the scan-history CSV
+  and don't produce HTML reports. WHOIS results are looked up fresh for each
+  request rather than cached across requests.
+- There is no authentication, and the server listens on all network
+  interfaces. Keep it on a trusted network, or put it behind a reverse proxy
+  that handles TLS and access control before exposing it more widely.
+
 ## Configuration
 
 `src/main/resources/phishnet-config.yaml` is bundled into the jar and used
@@ -520,8 +788,12 @@ mvn test
 
 JUnit 5 tests cover every module (parsing edge cases, internationalized
 domain names, malformed/empty input, missing email headers, scoring
-boundaries, CLI argument handling) with a mix of hand-built cases and
-real-world-style fixtures under `src/test/resources/{urls,emails}`.
+boundaries, CLI argument handling, REST API endpoints) with a mix of
+hand-built cases and real-world-style fixtures under
+`src/test/resources/{urls,emails}`. The API tests (`ApiServerTest`) start a
+real server on a random free port and call it over HTTP with the JDK's
+`HttpClient`, covering successful URL/email scans, every 400/404/405/413/500
+error path, and the JSON error shape - still with no external network access.
 Edge-case coverage includes empty/null/blank/whitespace-only and
 special-character-only input, multi-thousand-character URLs, malformed URLs
 (missing scheme, invalid characters, multiple `://`, trailing garbage),
@@ -532,7 +804,7 @@ or empty sections (brands, TLDs, weights).
 `mvn test` runs [JaCoCo](https://www.jacoco.org/jacoco/) automatically and
 generates an HTML report at `target/site/jacoco/index.html` - open that file
 in a browser for a line-by-line, package-by-package breakdown. The suite
-(299 tests as of this writing) maintains roughly **90% line / 79% branch**
+(320 tests as of this writing) maintains roughly **90% line / 79% branch**
 coverage overall; the biggest remaining gaps are `SslChecker`'s real-socket
 TLS handshake path and `SocketWhoisClient`'s port-43 I/O, which by design
 aren't exercised without a live network connection (the certificate-decision
@@ -554,9 +826,11 @@ src/main/java/com/phishnet/
   analyzer/   UrlAnalyzer, SslChecker, EmailAnalyzer, DomainAgeChecker, WhoisClient, SocketWhoisClient
   model/      Signal, RiskScore, UrlComponents, PhishNetConfig, ...
   scoring/    RiskScorer
-  cli/        Main (picocli @Command), ReportFormatter, Reporter, OutputLevel, HistoryWriter, HtmlReportWriter
+  cli/        Main (picocli @Command), ServeCommand, ReportFormatter, Reporter, OutputLevel, HistoryWriter, HtmlReportWriter
+  api/        ApiServer (Javalin routes, validation, JSON errors), ScanService (analyzer/scorer wrapper)
   util/       LevenshteinDistance, HomoglyphUtil, ConfigLoader, AnsiColor, ColorSupport
 src/main/resources/phishnet-config.yaml
+src/main/resources/simplelogger.properties  (log levels for serve mode)
 src/main/resources/version.properties  (Maven-filtered; feeds --version, see Contributing)
 src/test/java/...            (mirrors the layout above)
 src/test/resources/urls/     phishing_urls.txt, legitimate_urls.txt

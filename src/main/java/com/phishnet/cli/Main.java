@@ -55,6 +55,7 @@ import java.util.concurrent.Callable;
                 "  phishnet --url https://example.com",
                 "  phishnet --email suspicious.eml --verbose",
                 "  phishnet --batch urls.txt --json",
+                "  phishnet serve --port 8080   (REST API mode; see: phishnet serve --help)",
                 "",
                 "See the project README for the full option reference and sample output."
         }
@@ -197,12 +198,26 @@ public final class Main implements Callable<Integer> {
 
     /** Same as {@link #run(String[], PrintStream, PrintStream)}, with the WHOIS transport swapped out (for tests). */
     static int run(String[] args, PrintStream out, PrintStream err, WhoisClient whoisClient) {
+        // "serve" is dispatched here instead of being registered as a picocli subcommand:
+        // picocli would still enforce this command's required --url/--email/--batch group
+        // for "phishnet serve", and relaxing that group would change normal CLI parsing.
+        if (args.length > 0 && args[0].equals(SERVE_COMMAND)) {
+            ServeCommand serve = new ServeCommand(out, err, whoisClient);
+            return execute(new CommandLine(serve), Arrays.copyOfRange(args, 1, args.length), out, err);
+        }
+
         Main app = new Main();
         app.out = out;
         app.err = err;
         app.whoisClient = whoisClient;
+        return execute(new CommandLine(app), args, out, err);
+    }
 
-        CommandLine cmd = new CommandLine(app);
+    /** First argument that switches from a one-off scan to running the REST API server. */
+    static final String SERVE_COMMAND = "serve";
+
+    /** Applies the shared stream/color/error-handling setup, then parses and runs {@code cmd}. */
+    private static int execute(CommandLine cmd, String[] args, PrintStream out, PrintStream err) {
         cmd.setOut(new PrintWriter(out, true, StandardCharsets.UTF_8));
         cmd.setErr(new PrintWriter(err, true, StandardCharsets.UTF_8));
 
