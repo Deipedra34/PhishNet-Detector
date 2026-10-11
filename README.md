@@ -243,7 +243,7 @@ See the project README for the full option reference and sample output.
 
 ```
 $ java -jar target/phishnet.jar --version
-phishnet 2.1.0
+phishnet 2.1.1
 ```
 
 `--version` always reflects the version actually built (Maven filters it into
@@ -735,12 +735,16 @@ Notes:
 ## Docker
 
 A prebuilt multi-arch image (`linux/amd64`, `linux/arm64`) is published to
-Docker Hub on every release, so you can run PhishNet without installing a JDK
-or Maven:
+GitHub Container Registry on every release, so you can run PhishNet without
+installing a JDK or Maven:
 
 ```bash
-docker pull <dockerhub-username>/phishnet-detector:latest
+docker pull ghcr.io/deipedra34/phishnet-detector:latest
 ```
+
+When the repository's Docker Hub secrets are configured, the same image is
+also pushed to Docker Hub as `<dockerhub-username>/phishnet-detector`, with the
+same tags - the examples below work with either name.
 
 The container's entrypoint is `java -jar phishnet.jar`, so everything after
 the image name is passed straight to the CLI - `docker run <image> <args>`
@@ -751,15 +755,15 @@ with no arguments prints `--help`.
 
 ```bash
 # Analyze a single URL
-docker run --rm <dockerhub-username>/phishnet-detector --url https://example.com
+docker run --rm ghcr.io/deipedra34/phishnet-detector --url https://example.com
 
 # JSON output, skipping the live WHOIS lookup
-docker run --rm <dockerhub-username>/phishnet-detector --url https://example.com --json --no-whois
+docker run --rm ghcr.io/deipedra34/phishnet-detector --url https://example.com --json --no-whois
 
 # Analyze a local email or batch file: mount the current directory at /data
 # (the container's working directory) and pass paths relative to it
-docker run --rm -v "$PWD:/data" <dockerhub-username>/phishnet-detector --email suspicious.eml
-docker run --rm -v "$PWD:/data" <dockerhub-username>/phishnet-detector --batch urls.txt
+docker run --rm -v "$PWD:/data" ghcr.io/deipedra34/phishnet-detector --email suspicious.eml
+docker run --rm -v "$PWD:/data" ghcr.io/deipedra34/phishnet-detector --batch urls.txt
 ```
 
 Add `-t` (e.g. `docker run --rm -t ...`) for colored output and the live batch
@@ -773,7 +777,7 @@ your own user so the files land in your directory with your ownership:
 
 ```bash
 docker run --rm -v "$PWD:/data" --user "$(id -u):$(id -g)" \
-  <dockerhub-username>/phishnet-detector --url https://example.com --html-report report.html
+  ghcr.io/deipedra34/phishnet-detector --url https://example.com --html-report report.html
 ```
 
 ### Serve mode
@@ -781,10 +785,10 @@ docker run --rm -v "$PWD:/data" --user "$(id -u):$(id -g)" \
 Publish the API port with `-p` (the image exposes `8080`, the default port):
 
 ```bash
-docker run --rm -p 8080:8080 <dockerhub-username>/phishnet-detector serve --port 8080
+docker run --rm -p 8080:8080 ghcr.io/deipedra34/phishnet-detector serve --port 8080
 
 # Run in the background on a different host port
-docker run -d --name phishnet-api -p 9090:8080 <dockerhub-username>/phishnet-detector serve --no-whois
+docker run -d --name phishnet-api -p 9090:8080 ghcr.io/deipedra34/phishnet-detector serve --no-whois
 
 curl http://localhost:8080/api/health
 ```
@@ -793,7 +797,7 @@ To use a custom config in either mode, mount it and point `--config` at it:
 
 ```bash
 docker run --rm -p 8080:8080 -v "$PWD/my-config.yaml:/data/my-config.yaml:ro" \
-  <dockerhub-username>/phishnet-detector serve --config my-config.yaml
+  ghcr.io/deipedra34/phishnet-detector serve --config my-config.yaml
 ```
 
 `docker stop` sends SIGTERM, which shuts the server down cleanly, the same as
@@ -804,11 +808,15 @@ Ctrl+C.
 | Tag | Meaning |
 | --- | --- |
 | `latest` | The most recent release |
-| `vX.Y.Z` (e.g. `v2.1.0`) | A specific release, matching the git tag and GitHub Release of the same name - pin this for reproducible deployments |
+| `vX.Y.Z` (e.g. `v2.1.1`) | A specific release, matching the git tag and GitHub Release of the same name - pin this for reproducible deployments |
 
 Images are built and pushed by the
 [Docker Publish workflow](.github/workflows/docker-publish.yml) whenever a
-`v*.*.*` tag is pushed.
+`v*.*.*` tag is pushed. Publishing to `ghcr.io` needs no setup (it uses the
+workflow's built-in `GITHUB_TOKEN`). Docker Hub publishing is optional: add
+`DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (a Docker Hub access token) under
+Settings > Secrets and variables > Actions to enable it - without them that
+step is skipped rather than failing the run.
 
 ### Building the image locally
 

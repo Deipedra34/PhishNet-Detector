@@ -1,14 +1,22 @@
 name: Docker Publish
 
-# Build the Docker image and push it to Docker Hub whenever a semver tag
-# (e.g. v2.1.0) is pushed - same trigger as the Release workflow.
+# Build the Docker image and publish it whenever a semver tag (e.g. v2.1.1) is
+# pushed - same trigger as the Release workflow.
+#
+# The image always goes to GitHub Container Registry (ghcr.io), which needs no
+# setup: it authenticates with the built-in GITHUB_TOKEN. It is also pushed to
+# Docker Hub when the DOCKERHUB_USERNAME and DOCKERHUB_TOKEN repository secrets
+# are set (Settings > Secrets and variables > Actions); without them that part
+# is skipped instead of failing the run.
 on:
   push:
     tags:
       - 'v*.*.*'
 
+# packages: write lets GITHUB_TOKEN push to ghcr.io.
 permissions:
   contents: read
+  packages: write
 
 jobs:
   docker:
@@ -18,6 +26,22 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # ghcr.io image names must be lowercase, but the repository owner may not be.
+      # Secrets can't be used in step-level if: conditions, so check them here.
+      - name: Resolve image names
+        id: meta
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          echo "ghcr=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/phishnet-detector" >> "$GITHUB_OUTPUT"
+          if [ -n "$DOCKERHUB_USERNAME" ] && [ -n "$DOCKERHUB_TOKEN" ]; then
+            echo "dockerhub=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "dockerhub=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::DOCKERHUB_USERNAME / DOCKERHUB_TOKEN secrets are not set - publishing to ghcr.io only."
+          fi
+
       # QEMU lets the runner build the linux/arm64 runtime stage on an amd64 host.
       # (The Maven build stage itself runs natively - see --platform in the Dockerfile.)
       - name: Set up QEMU
@@ -26,16 +50,24 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      # Requires the DOCKERHUB_USERNAME and DOCKERHUB_TOKEN repository secrets
-      # (Settings > Secrets and variables > Actions). Use a Docker Hub access
-      # token, not the account password.
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Use a Docker Hub access token for DOCKERHUB_TOKEN, not the account password.
       - name: Log in to Docker Hub
+        if: steps.meta.outputs.dockerhub == 'true'
         uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # Tags the image with the pushed git tag (e.g. :v2.1.0) and :latest.
+      # Tags the image with the pushed git tag (e.g. :v2.1.1) and :latest. The
+      # Docker Hub lines evaluate to empty (and are ignored) when it's not set up.
+      # The source label links the ghcr.io package to this repository.
       - name: Build and push image
         uses: docker/build-push-action@v7
         with:
@@ -43,7 +75,12 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/phishnet-detector:${{ github.ref_name }}
-            ${{ secrets.DOCKERHUB_USERNAME }}/phishnet-detector:latest
+            ${{ steps.meta.outputs.ghcr }}:${{ github.ref_name }}
+            ${{ steps.meta.outputs.ghcr }}:latest
+            ${{ steps.meta.outputs.dockerhub == 'true' && format('{0}/phishnet-detector:{1}', secrets.DOCKERHUB_USERNAME, github.ref_name) || '' }}
+            ${{ steps.meta.outputs.dockerhub == 'true' && format('{0}/phishnet-detector:latest', secrets.DOCKERHUB_USERNAME) || '' }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ github.ref_name }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
