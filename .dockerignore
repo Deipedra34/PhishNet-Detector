@@ -1,0 +1,49 @@
+# The image build only needs pom.xml and src/ - keep everything else out of the
+# build context so it stays small and local artifacts never leak into the image.
+
+# Build output
+target/
+*.class
+dependency-reduced-pom.xml
+
+# Version control and CI
+.git/
+.gitignore
+.gitattributes
+.github/
+
+# IDE / editor
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.classpath
+.project
+.factorypath
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs and runtime artifacts
+*.log
+phishnet-history.csv
+*.html
+
+# Docs and assets (not needed to build the jar)
+README.md
+LICENSE
+assets/
+
+# Docker files themselves
+Dockerfile
+.dockerignore
+
+# Env / secrets
+.env
+.env.*

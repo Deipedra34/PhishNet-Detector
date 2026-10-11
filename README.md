@@ -26,6 +26,7 @@ scanning over HTTP - see [REST API (serve mode)](#rest-api-serve-mode).
 - [Setup](#setup)
 - [Usage](#usage)
 - [REST API (serve mode)](#rest-api-serve-mode)
+- [Docker](#docker)
 - [Configuration](#configuration)
 - [Testing](#testing)
 - [Project layout](#project-layout)
@@ -242,7 +243,7 @@ See the project README for the full option reference and sample output.
 
 ```
 $ java -jar target/phishnet.jar --version
-phishnet 2.0.1
+phishnet 2.1.0
 ```
 
 `--version` always reflects the version actually built (Maven filters it into
@@ -731,6 +732,95 @@ Notes:
   interfaces. Keep it on a trusted network, or put it behind a reverse proxy
   that handles TLS and access control before exposing it more widely.
 
+## Docker
+
+A prebuilt multi-arch image (`linux/amd64`, `linux/arm64`) is published to
+Docker Hub on every release, so you can run PhishNet without installing a JDK
+or Maven:
+
+```bash
+docker pull <dockerhub-username>/phishnet-detector:latest
+```
+
+The container's entrypoint is `java -jar phishnet.jar`, so everything after
+the image name is passed straight to the CLI - `docker run <image> <args>`
+behaves exactly like `java -jar target/phishnet.jar <args>`. Running the image
+with no arguments prints `--help`.
+
+### Scan mode
+
+```bash
+# Analyze a single URL
+docker run --rm <dockerhub-username>/phishnet-detector --url https://example.com
+
+# JSON output, skipping the live WHOIS lookup
+docker run --rm <dockerhub-username>/phishnet-detector --url https://example.com --json --no-whois
+
+# Analyze a local email or batch file: mount the current directory at /data
+# (the container's working directory) and pass paths relative to it
+docker run --rm -v "$PWD:/data" <dockerhub-username>/phishnet-detector --email suspicious.eml
+docker run --rm -v "$PWD:/data" <dockerhub-username>/phishnet-detector --batch urls.txt
+```
+
+Add `-t` (e.g. `docker run --rm -t ...`) for colored output and the live batch
+progress bar - without a TTY the output is plain, just like when piping.
+
+The container runs as an unprivileged user (UID/GID `10001`), not root. Scan
+history (`phishnet-history.csv`) and HTML reports are written to `/data`; if
+that's a mounted directory the container user can't write to, PhishNet prints
+a warning and carries on with the scan. Either pass `--no-history`, or run as
+your own user so the files land in your directory with your ownership:
+
+```bash
+docker run --rm -v "$PWD:/data" --user "$(id -u):$(id -g)" \
+  <dockerhub-username>/phishnet-detector --url https://example.com --html-report report.html
+```
+
+### Serve mode
+
+Publish the API port with `-p` (the image exposes `8080`, the default port):
+
+```bash
+docker run --rm -p 8080:8080 <dockerhub-username>/phishnet-detector serve --port 8080
+
+# Run in the background on a different host port
+docker run -d --name phishnet-api -p 9090:8080 <dockerhub-username>/phishnet-detector serve --no-whois
+
+curl http://localhost:8080/api/health
+```
+
+To use a custom config in either mode, mount it and point `--config` at it:
+
+```bash
+docker run --rm -p 8080:8080 -v "$PWD/my-config.yaml:/data/my-config.yaml:ro" \
+  <dockerhub-username>/phishnet-detector serve --config my-config.yaml
+```
+
+`docker stop` sends SIGTERM, which shuts the server down cleanly, the same as
+Ctrl+C.
+
+### Tags
+
+| Tag | Meaning |
+| --- | --- |
+| `latest` | The most recent release |
+| `vX.Y.Z` (e.g. `v2.1.0`) | A specific release, matching the git tag and GitHub Release of the same name - pin this for reproducible deployments |
+
+Images are built and pushed by the
+[Docker Publish workflow](.github/workflows/docker-publish.yml) whenever a
+`v*.*.*` tag is pushed.
+
+### Building the image locally
+
+```bash
+docker build -t phishnet-detector .
+docker run --rm phishnet-detector --url https://example.com
+```
+
+The [`Dockerfile`](Dockerfile) is multi-stage: a Maven + JDK 26 stage runs
+`mvn clean package` (tests included), and only the resulting jar is copied
+into a minimal `eclipse-temurin:26-jre-alpine` runtime image.
+
 ## Configuration
 
 `src/main/resources/phishnet-config.yaml` is bundled into the jar and used
@@ -835,6 +925,8 @@ src/main/resources/version.properties  (Maven-filtered; feeds --version, see Con
 src/test/java/...            (mirrors the layout above)
 src/test/resources/urls/     phishing_urls.txt, legitimate_urls.txt
 src/test/resources/emails/   .eml fixtures (phishing and legitimate)
+Dockerfile, .dockerignore    container image (see Docker)
+.github/workflows/           ci.yml, release.yml, docker-publish.yml
 ```
 
 ## Contributing
