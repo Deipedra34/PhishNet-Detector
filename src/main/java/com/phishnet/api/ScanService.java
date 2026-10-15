@@ -5,6 +5,7 @@ import com.phishnet.analyzer.EmailAnalyzer;
 import com.phishnet.analyzer.UrlAnalyzer;
 import com.phishnet.analyzer.WhoisClient;
 import com.phishnet.cli.ReportFormatter;
+import com.phishnet.history.HistoryDatabase;
 import com.phishnet.model.DomainAgeResult;
 import com.phishnet.model.EmailAnalysisResult;
 import com.phishnet.model.PhishNetConfig;
@@ -24,7 +25,9 @@ import java.util.Map;
  * state, so a single instance is shared by every request the API server handles.
  *
  * Unlike the CLI, API scans are not written to the scan-history CSV or an HTML
- * report - the server stays free of filesystem side effects.
+ * report. They are recorded in the SQLite scan history when a {@link HistoryDatabase}
+ * is supplied (the default for {@code phishnet serve}), so they show up in
+ * {@code phishnet history} alongside CLI scans.
  */
 public final class ScanService {
 
@@ -32,16 +35,26 @@ public final class ScanService {
     private final EmailAnalyzer emailAnalyzer;
     private final RiskScorer scorer;
     private final WhoisClient whoisClient;
+    private final HistoryDatabase history;
 
     /**
      * @param whoisClient WHOIS transport for URL scans' domain-age lookup, or {@code null}
      *                    to skip domain age entirely (the API equivalent of {@code --no-whois})
      */
     public ScanService(PhishNetConfig config, WhoisClient whoisClient) {
+        this(config, whoisClient, null);
+    }
+
+    /**
+     * Same, recording every scan in {@code history}, or in nothing when it's {@code null}.
+     * {@link HistoryDatabase} serializes its own writes, so concurrent requests are safe.
+     */
+    public ScanService(PhishNetConfig config, WhoisClient whoisClient, HistoryDatabase history) {
         this.urlAnalyzer = new UrlAnalyzer(config);
         this.emailAnalyzer = new EmailAnalyzer(config, urlAnalyzer);
         this.scorer = new RiskScorer(config);
         this.whoisClient = whoisClient;
+        this.history = history;
     }
 
     public Map<String, Object> scanUrl(String url) {
@@ -53,6 +66,9 @@ public final class ScanService {
                 ? DomainAgeResult.skipped()
                 : new DomainAgeChecker(whoisClient).check(result.components());
         RiskScore score = scorer.score(result.signals(), domainAge);
+        if (history != null) {
+            history.recordUrl(url, result.components(), score, domainAge);
+        }
 
         Map<String, Object> root = withType(ReportFormatter.toMap(url, score), "URL");
         root.put("domainAge", domainAgeMap(domainAge));
@@ -63,6 +79,9 @@ public final class ScanService {
     public Map<String, Object> scanEmail(String label, InputStream eml) {
         EmailAnalysisResult result = emailAnalyzer.analyze(eml);
         RiskScore score = scorer.score(result.allSignals());
+        if (history != null) {
+            history.recordEmail(label, result.senderAddress(), result.subject(), score);
+        }
 
         Map<String, Object> email = new LinkedHashMap<>();
         email.put("from", result.senderAddress());

@@ -25,6 +25,7 @@ scanning over HTTP - see [REST API (serve mode)](#rest-api-serve-mode).
 - [How scoring works](#how-scoring-works)
 - [Setup](#setup)
 - [Usage](#usage)
+- [Scan History](#scan-history)
 - [REST API (serve mode)](#rest-api-serve-mode)
 - [Docker](#docker)
 - [Configuration](#configuration)
@@ -186,8 +187,8 @@ $ java -jar target/phishnet.jar --help
 Usage:
 phishnet [-hV] [--config=<path>] (--url=<url> | --email=<file.eml> |
          --batch=<file>) [[--json] [--no-color]] [-v | -q]
-         [[--history-file=<path>] [--no-history]] [[--html-report=<path>]]
-         [[--no-whois]]
+         [[--history-file=<path>] [--no-history] [--history-db=<path>]
+         [--no-history-db]] [[--html-report=<path>]] [[--no-whois]]
 
 Analyzes URLs, TLS certificates, and .eml email files for phishing indicators,
 and combines whatever it finds into a single 0-100 risk score with a
@@ -221,6 +222,11 @@ History options:
                                /phishnet-history.csv)
       --no-history           Do not append this run's results to the scan
                                history CSV
+      --history-db=<path>    Record scan results in this SQLite database
+                               (default: ~/.phishnet/phishnet-history.db; query
+                               it with: phishnet history)
+      --no-history-db        Do not record this run's results in the scan
+                               history database
 
 Report options:
       --html-report=<path>   Write a self-contained, styled HTML report of this
@@ -237,13 +243,14 @@ Examples:
   phishnet --email suspicious.eml --verbose
   phishnet --batch urls.txt --json
   phishnet serve --port 8080   (REST API mode; see: phishnet serve --help)
+  phishnet history list        (past scans; see: phishnet history --help)
 
 See the project README for the full option reference and sample output.
 ```
 
 ```
 $ java -jar target/phishnet.jar --version
-phishnet 2.1.1
+phishnet 2.2.0
 ```
 
 `--version` always reflects the version actually built (Maven filters it into
@@ -288,8 +295,14 @@ java -jar target/phishnet.jar --url "https://example.com" --config my-config.yam
 # Write scan history somewhere other than ./phishnet-history.csv
 java -jar target/phishnet.jar --url "https://example.com" --history-file ~/phishnet-scans.csv
 
-# Don't record this run in the scan history at all
+# Don't record this run in the scan history CSV
 java -jar target/phishnet.jar --url "https://example.com" --no-history
+
+# Don't record this run in the scan history database (see Scan History below)
+java -jar target/phishnet.jar --url "https://example.com" --no-history-db
+
+# Query past scans
+java -jar target/phishnet.jar history list
 
 # Write a self-contained HTML report of this run's results
 java -jar target/phishnet.jar --batch urls.txt --html-report scan-report.html
@@ -356,7 +369,7 @@ Domain Age: unknown                                                          # l
   stall on one slow registry.
 - `--no-whois` turns lookups off completely (offline use, fast scans, CI).
 
-### Scan history
+### Scan history CSV
 
 Every scan appends one row to a CSV history file as a side effect - single
 `--url`, single `--email`, and each item of a `--batch` run (written
@@ -366,6 +379,8 @@ history). This happens regardless of `--verbose`/`--quiet`/`--json` mode.
 - Default location: `./phishnet-history.csv`, relative to the current working
   directory. Override it with `--history-file <path>`.
 - `--no-history` disables logging for that run.
+- Scans are also recorded in a queryable SQLite database, independently of
+  this file - see [Scan History](#scan-history).
 - The file is created with a header row on first use; later runs append without
   rewriting the header.
 - If the history file can't be written (permissions, disk full, ...), a warning
@@ -476,6 +491,135 @@ $ java -jar target/phishnet.jar --batch urls.txt
 Summary: 10 URL(s) analyzed - 0 high risk, 6 medium risk
 ```
 
+## Scan History
+
+Alongside the CSV file, every scan is recorded in a local SQLite database that
+the `phishnet history` command can list, search, and summarize. That covers
+single `--url`/`--email` scans, each item of a `--batch` run, and scans made
+through the REST API (`phishnet serve`).
+
+- Default location: `~/.phishnet/phishnet-history.db`, under your home
+  directory, so every scan lands in one place whichever directory you run
+  from. Override it with `--history-db <path>` - on scans, on `serve`, and on
+  `phishnet history` itself.
+- The database file and its schema are created automatically on the first
+  scan; there is no setup or migration step.
+- `--no-history-db` turns it off for one run (or for a whole `serve` process).
+  It's independent of `--no-history`, which only affects the CSV - pass both
+  to keep no history at all.
+- Like the CSV, a database that can't be written (permissions, a locked or
+  corrupt file, ...) only prints a warning to stderr; the scan still
+  completes normally.
+
+### `phishnet history` commands
+
+```
+phishnet history list   [--limit <n>]
+phishnet history search [--target <text>] [--risk <level>] [--type <type>]
+                        [--since <YYYY-MM-DD>] [--until <YYYY-MM-DD>] [--limit <n>]
+phishnet history stats  [--top <n>]
+```
+
+| Command | Shows |
+| --- | --- |
+| `list` | The most recent scans, newest first (default 20; `--limit 0` shows all) |
+| `search` | Scans matching every filter given, newest first (default 20; `--limit 0` shows all) |
+| `stats` | Total scans, counts by risk level and by type, and the domains with the most MEDIUM/HIGH scans (`--top`, default 10) |
+
+`search` filters can be combined freely:
+
+| Filter | Matches |
+| --- | --- |
+| `--target <text>` | Case-insensitive substring of the URL, its domain, the email file name, the sender's domain, or the email subject |
+| `--risk <level>` | `LOW`, `MEDIUM`, or `HIGH` (case-insensitive) |
+| `--type <type>` | `URL` or `EMAIL` (case-insensitive) |
+| `--since <YYYY-MM-DD>` | Scans on or after that day (local time) |
+| `--until <YYYY-MM-DD>` | Scans on or before that day (local time) |
+
+Every `history` command also takes `--history-db <path>`, `--no-color`, and
+the same verbosity flags as a scan: `-v`/`--verbose` adds each scan's domain,
+domain age, email subject, and signals; `-q`/`--quiet` prints one
+`LEVEL SCORE TARGET` line per scan (the same format as a `--quiet` scan), or a
+single `key=value` line for `stats`. Risk levels are colored on a terminal,
+following the same rules as scan output.
+
+Reading never creates the database: if it doesn't exist yet, the commands say
+so and exit `0`. Exit code `1` means the database couldn't be read, and `2` a
+bad argument (an unknown risk level, a malformed date, `--since` after
+`--until`, ...).
+
+```
+$ java -jar target/phishnet.jar history list --limit 5
+ID  TIME              TYPE   SCORE  RISK    TARGET
+ 8  2026-10-15 19:20  EMAIL     25  LOW     phishing_sender_mismatch.eml
+ 7  2026-10-15 19:20  URL       50  MEDIUM  http://secure-paypa1.tk/account
+ 6  2026-10-15 19:20  URL       20  LOW     http://free-prize.tk
+ 5  2026-10-15 19:20  URL        0  LOW     https://www.paypal.com/signin
+ 4  2026-10-15 19:20  URL       25  LOW     http://192.168.1.1/login
+
+5 scan(s) shown (database: /home/alice/.phishnet/phishnet-history.db)
+```
+
+```
+$ java -jar target/phishnet.jar history search --target paypa1 --risk medium --verbose
+ID  TIME                 TYPE   SCORE  RISK    TARGET
+ 7  2026-10-15 19:20:04  URL       50  MEDIUM  http://secure-paypa1.tk/account
+    Domain: secure-paypa1.tk
+    Signals:
+      - [suspiciousTld] URL uses a TLD commonly abused for phishing
+      - [typosquatting] Domain segment 'paypa1' closely resembles brand 'paypal' (edit distance 1)
+
+1 scan(s) shown (database: /home/alice/.phishnet/phishnet-history.db)
+```
+
+```
+$ java -jar target/phishnet.jar history search --risk HIGH --since 2026-10-01 --until 2026-10-31 --quiet
+HIGH 70 http://paypa1-login.tk/verify?redirect=http://evil.tk/x
+```
+
+```
+$ java -jar target/phishnet.jar history stats
+Total scans: 8 (2026-10-15 19:20 to 2026-10-15 19:20)
+Database: /home/alice/.phishnet/phishnet-history.db
+
+By risk level:
+  HIGH    1   12.5%
+  MEDIUM  1   12.5%
+  LOW     6   75.0%
+
+By type:
+  URL     7
+  EMAIL   1
+
+Most frequently flagged domains (MEDIUM/HIGH risk):
+  1. paypa1-login.tk   1
+  2. secure-paypa1.tk  1
+```
+
+### Database schema
+
+It's a plain SQLite file with a single `scans` table, so any SQLite tool can
+query it directly too (e.g.
+`sqlite3 ~/.phishnet/phishnet-history.db "SELECT domain, COUNT(*) FROM scans GROUP BY domain"`).
+
+| Column | Meaning |
+| --- | --- |
+| `id` | Auto-increment row id (the `ID` column above) |
+| `timestamp` | When the scan was recorded: UTC ISO-8601 with millisecond precision, e.g. `2026-10-15T16:20:04.118Z` |
+| `type` | `URL` or `EMAIL` |
+| `target` | The scanned URL, or the `.eml` file path (for API scans: the uploaded file name, or `raw email`) |
+| `domain` | Registrable domain (or IP address) of a URL; the sender's domain for an email. Empty when there isn't one |
+| `subject` | Email subject line; empty for URL scans |
+| `risk_score` | 0-100 integer |
+| `risk_level` | `LOW`, `MEDIUM`, or `HIGH` |
+| `signals` | JSON array of the triggered signals, e.g. `[{"id":"typosquatting","description":"Domain segment ..."}]` |
+| `domain_age_days` | WHOIS domain age in days; empty when it isn't known (`--no-whois`, failed lookup, IP host, email) |
+
+A connection is opened per scan, so an interrupted `--batch` keeps every row
+recorded so far, and a CLI scan and a running `serve` process can safely share
+the same file. All queries use bound parameters - search text is never
+interpreted as SQL.
+
 ## REST API (serve mode)
 
 `phishnet serve` starts an embedded HTTP server ([Javalin](https://javalin.io),
@@ -501,6 +645,7 @@ PhishNet API listening on http://localhost:8080 (Ctrl+C to stop)
   GET  /api/health
   POST /api/scan/url
   POST /api/scan/email
+Recording scans to /home/alice/.phishnet/phishnet-history.db
 ```
 
 | Option | Meaning |
@@ -508,6 +653,8 @@ PhishNet API listening on http://localhost:8080 (Ctrl+C to stop)
 | `--port <port>` | TCP port to listen on (default `8080`; `0` picks a free port) |
 | `--config <path>` | Use a custom YAML config instead of the bundled default (same as the CLI) |
 | `--no-whois` | Skip the live WHOIS domain-age lookup for URL scans (same as the CLI) |
+| `--history-db <path>` | Record API scans in this SQLite database (default `~/.phishnet/phishnet-history.db`, same as the CLI) |
+| `--no-history-db` | Don't record API scans in the scan history database |
 
 The server runs until stopped with Ctrl+C (or SIGTERM), which shuts it down
 cleanly. Exit code `2` means a bad option (e.g. an out-of-range port), `1`
@@ -725,9 +872,11 @@ Notes:
 
 - Request bodies (JSON or multipart) are capped at **5 MB**; oversized bodies
   are rejected without being buffered in full.
-- API scans are stateless: they are **not** written to the scan-history CSV
-  and don't produce HTML reports. WHOIS results are looked up fresh for each
-  request rather than cached across requests.
+- API scans are **not** written to the scan-history CSV and don't produce
+  HTML reports, but they are recorded in the scan history database (unless
+  `--no-history-db` is given), so they show up in `phishnet history` alongside
+  CLI scans. WHOIS results are looked up fresh for each request rather than
+  cached across requests.
 - There is no authentication, and the server listens on all network
   interfaces. Keep it on a trusted network, or put it behind a reverse proxy
   that handles TLS and access control before exposing it more widely.
@@ -777,7 +926,26 @@ your own user so the files land in your directory with your ownership:
 
 ```bash
 docker run --rm -v "$PWD:/data" --user "$(id -u):$(id -g)" \
-  ghcr.io/deipedra34/phishnet-detector --url https://example.com --html-report report.html
+  ghcr.io/deipedra34/phishnet-detector --url https://example.com --html-report report.html \
+  --history-db phishnet-history.db
+```
+
+(An arbitrary `--user` has no writable home directory inside the image, which
+is why that example keeps the scan history database in `/data` too.)
+
+### Scan history in a container
+
+The [scan history database](#scan-history) lives at
+`/home/phishnet/.phishnet/phishnet-history.db` inside the container, so with
+`--rm` it goes away with the container. Mount a named volume there to keep it
+across runs - for scans, `serve`, and `history` alike:
+
+```bash
+docker run --rm -v phishnet-history:/home/phishnet/.phishnet \
+  ghcr.io/deipedra34/phishnet-detector --url https://example.com
+
+docker run --rm -v phishnet-history:/home/phishnet/.phishnet \
+  ghcr.io/deipedra34/phishnet-detector history list
 ```
 
 ### Serve mode
@@ -892,6 +1060,11 @@ hand-built cases and real-world-style fixtures under
 real server on a random free port and call it over HTTP with the JDK's
 `HttpClient`, covering successful URL/email scans, every 400/404/405/413/500
 error path, and the JSON error shape - still with no external network access.
+`HistoryDatabaseTest` covers the SQLite scan history (schema creation, inserts,
+listing, target/risk/type/date filters, LIKE-wildcard and SQL-injection-style
+search text, stats aggregation, write failures) against a fresh database file
+in a JUnit temp directory per test, so the suite never touches your real
+`~/.phishnet` history; `HistoryCommandTest` drives `phishnet history` end to end.
 Edge-case coverage includes empty/null/blank/whitespace-only and
 special-character-only input, multi-thousand-character URLs, malformed URLs
 (missing scheme, invalid characters, multiple `://`, trailing garbage),
@@ -902,7 +1075,7 @@ or empty sections (brands, TLDs, weights).
 `mvn test` runs [JaCoCo](https://www.jacoco.org/jacoco/) automatically and
 generates an HTML report at `target/site/jacoco/index.html` - open that file
 in a browser for a line-by-line, package-by-package breakdown. The suite
-(323 tests as of this writing) maintains roughly **90% line / 79% branch**
+(380 tests as of this writing) maintains roughly **90% line / 80% branch**
 coverage overall; the biggest remaining gaps are `SslChecker`'s real-socket
 TLS handshake path and `SocketWhoisClient`'s port-43 I/O, which by design
 aren't exercised without a live network connection (the certificate-decision
@@ -924,7 +1097,8 @@ src/main/java/com/phishnet/
   analyzer/   UrlAnalyzer, SslChecker, EmailAnalyzer, DomainAgeChecker, WhoisClient, SocketWhoisClient
   model/      Signal, RiskScore, UrlComponents, PhishNetConfig, ...
   scoring/    RiskScorer
-  cli/        Main (picocli @Command), ServeCommand, ReportFormatter, Reporter, OutputLevel, HistoryWriter, HtmlReportWriter
+  cli/        Main (picocli @Command), ServeCommand, HistoryCommand, ReportFormatter, Reporter, HistoryReporter, OutputLevel, HistoryWriter, HtmlReportWriter
+  history/    HistoryDatabase (SQLite scan history), HistoryEntry, HistoryFilter, HistoryStats
   api/        ApiServer (Javalin routes, validation, JSON errors), ScanService (analyzer/scorer wrapper)
   util/       LevenshteinDistance, HomoglyphUtil, ConfigLoader, AnsiColor, ColorSupport
 src/main/resources/phishnet-config.yaml

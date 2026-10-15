@@ -20,10 +20,13 @@ FROM eclipse-temurin:26-jre-alpine
 
 # Run as an unprivileged user. A fixed numeric UID/GID lets orchestrators
 # (e.g. Kubernetes runAsNonRoot) verify the image doesn't run as root.
+# The home directory holds the SQLite scan history (~/.phishnet). Creating
+# .phishnet in the image means a named volume mounted there starts out owned
+# by this user, so history can persist across container runs.
 RUN addgroup -S -g 10001 phishnet \
-    && adduser -S -D -H -u 10001 -G phishnet -s /sbin/nologin phishnet \
-    && mkdir -p /opt/phishnet /data \
-    && chown phishnet:phishnet /data
+    && adduser -S -D -h /home/phishnet -u 10001 -G phishnet -s /sbin/nologin phishnet \
+    && mkdir -p /opt/phishnet /data /home/phishnet/.phishnet \
+    && chown phishnet:phishnet /data /home/phishnet /home/phishnet/.phishnet
 
 # The jar stays root-owned and read-only to the runtime user.
 COPY --from=build /build/target/phishnet.jar /opt/phishnet/phishnet.jar

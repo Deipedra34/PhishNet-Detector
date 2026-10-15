@@ -5,6 +5,7 @@ import com.phishnet.analyzer.EmailAnalyzer;
 import com.phishnet.analyzer.SocketWhoisClient;
 import com.phishnet.analyzer.UrlAnalyzer;
 import com.phishnet.analyzer.WhoisClient;
+import com.phishnet.history.HistoryDatabase;
 import com.phishnet.model.DomainAgeResult;
 import com.phishnet.model.EmailAnalysisResult;
 import com.phishnet.model.PhishNetConfig;
@@ -56,6 +57,7 @@ import java.util.concurrent.Callable;
                 "  phishnet --email suspicious.eml --verbose",
                 "  phishnet --batch urls.txt --json",
                 "  phishnet serve --port 8080   (REST API mode; see: phishnet serve --help)",
+                "  phishnet history list        (past scans; see: phishnet history --help)",
                 "",
                 "See the project README for the full option reference and sample output."
         }
@@ -129,7 +131,9 @@ public final class Main implements Callable<Integer> {
 
     // Scan history logging is a side effect of scanning, independent of the output
     // options above - a --json or --quiet run still appends its rows. Kept in a
-    // non-exclusive group only so the two flags get their own labeled --help section.
+    // non-exclusive group only so the flags get their own labeled --help section.
+    // The CSV file and the SQLite database are independent: each has its own
+    // location and "off" switch.
     @ArgGroup(exclusive = false, multiplicity = "0..1", heading = "%nHistory options:%n")
     private HistoryOptions history = new HistoryOptions();
 
@@ -141,6 +145,15 @@ public final class Main implements Callable<Integer> {
         @Option(names = "--no-history",
                 description = "Do not append this run's results to the scan history CSV")
         private boolean disabled;
+
+        @Option(names = "--history-db", paramLabel = "<path>",
+                description = "Record scan results in this SQLite database "
+                        + "(default: ~/.phishnet/phishnet-history.db; query it with: phishnet history)")
+        private String databaseFile;
+
+        @Option(names = "--no-history-db",
+                description = "Do not record this run's results in the scan history database")
+        private boolean databaseDisabled;
     }
 
     /** Default scan-history CSV, relative to the current working directory. */
@@ -205,6 +218,10 @@ public final class Main implements Callable<Integer> {
             ServeCommand serve = new ServeCommand(out, err, whoisClient);
             return execute(new CommandLine(serve), Arrays.copyOfRange(args, 1, args.length), out, err);
         }
+        // Same reasoning for "history", which takes no scan input at all.
+        if (args.length > 0 && args[0].equals(HISTORY_COMMAND)) {
+            return execute(HistoryCommand.commandLine(out, err), Arrays.copyOfRange(args, 1, args.length), out, err);
+        }
 
         Main app = new Main();
         app.out = out;
@@ -215,6 +232,9 @@ public final class Main implements Callable<Integer> {
 
     /** First argument that switches from a one-off scan to running the REST API server. */
     static final String SERVE_COMMAND = "serve";
+
+    /** First argument that switches from a one-off scan to querying the scan history database. */
+    static final String HISTORY_COMMAND = "history";
 
     /** Applies the shared stream/color/error-handling setup, then parses and runs {@code cmd}. */
     private static int execute(CommandLine cmd, String[] args, PrintStream out, PrintStream err) {
@@ -265,6 +285,10 @@ public final class Main implements Callable<Integer> {
 
         Path historyFile = history.file != null ? Path.of(history.file) : DEFAULT_HISTORY_FILE;
         HistoryWriter historyWriter = new HistoryWriter(historyFile, !history.disabled, err);
+        Path databaseFile = history.databaseFile != null
+                ? Path.of(history.databaseFile)
+                : HistoryDatabase.defaultPath();
+        HistoryDatabase historyDb = new HistoryDatabase(databaseFile, !history.databaseDisabled, err);
 
         boolean htmlReportEnabled = report.htmlReportPath != null;
         Path htmlReportFile = htmlReportEnabled ? Path.of(report.htmlReportPath) : null;
@@ -277,15 +301,15 @@ public final class Main implements Callable<Integer> {
         try {
             if (mode.url != null) {
                 return runUrl(mode.url, urlAnalyzer, domainAgeChecker, scorer, formatter, reporter, historyWriter,
-                        htmlReportWriter, output.json, out);
+                        historyDb, htmlReportWriter, output.json, out);
             } else if (mode.emailPath != null) {
                 return runEmail(mode.emailPath, emailAnalyzer, scorer, formatter, reporter, historyWriter,
-                        htmlReportWriter, output.json, out);
+                        historyDb, htmlReportWriter, output.json, out);
             } else {
                 ProgressListener progress = ProgressReporter.forBatch(
                         level, output.json, ColorSupport.isTty(), out, err, colorEnabled);
                 return runBatch(mode.batchPath, urlAnalyzer, domainAgeChecker, scorer, formatter, reporter,
-                        historyWriter, htmlReportWriter, output.json, out, progress);
+                        historyWriter, historyDb, htmlReportWriter, output.json, out, progress);
             }
         } catch (IOException e) {
             err.println("Error: " + e.getMessage());
@@ -303,12 +327,13 @@ public final class Main implements Callable<Integer> {
 
     private static int runUrl(String url, UrlAnalyzer urlAnalyzer, DomainAgeChecker domainAgeChecker,
                                RiskScorer scorer, ReportFormatter formatter, Reporter reporter,
-                               HistoryWriter historyWriter, HtmlReportWriter htmlReportWriter,
-                               boolean json, PrintStream out) {
+                               HistoryWriter historyWriter, HistoryDatabase historyDb,
+                               HtmlReportWriter htmlReportWriter, boolean json, PrintStream out) {
         UrlAnalysisResult result = urlAnalyzer.analyze(url);
         DomainAgeResult domainAge = domainAgeFor(result, domainAgeChecker);
         RiskScore score = scorer.score(result.signals(), domainAge);
         historyWriter.record(url, HistoryWriter.TargetType.URL, score, domainAge);
+        historyDb.recordUrl(url, result.components(), score, domainAge);
         htmlReportWriter.write(List.of(new AnalysisEntry(url, score, HistoryWriter.TargetType.URL, domainAge)));
         if (json) {
             out.println(formatter.json(url, score));
@@ -324,11 +349,13 @@ public final class Main implements Callable<Integer> {
 
     private static int runEmail(String emailPath, EmailAnalyzer emailAnalyzer, RiskScorer scorer,
                                  ReportFormatter formatter, Reporter reporter, HistoryWriter historyWriter,
-                                 HtmlReportWriter htmlReportWriter, boolean json, PrintStream out) throws IOException {
+                                 HistoryDatabase historyDb, HtmlReportWriter htmlReportWriter, boolean json,
+                                 PrintStream out) throws IOException {
         try (InputStream in = Files.newInputStream(Path.of(emailPath))) {
             EmailAnalysisResult result = emailAnalyzer.analyze(in);
             RiskScore score = scorer.score(result.allSignals());
             historyWriter.record(emailPath, HistoryWriter.TargetType.EMAIL, score);
+            historyDb.recordEmail(emailPath, result.senderAddress(), result.subject(), score);
             htmlReportWriter.write(List.of(new AnalysisEntry(emailPath, score, HistoryWriter.TargetType.EMAIL)));
             if (json) {
                 String label = emailPath + " (from: " + result.senderAddress()
@@ -343,7 +370,7 @@ public final class Main implements Callable<Integer> {
 
     private static int runBatch(String batchPath, UrlAnalyzer urlAnalyzer, DomainAgeChecker domainAgeChecker,
                                  RiskScorer scorer, ReportFormatter formatter, Reporter reporter,
-                                 HistoryWriter historyWriter,
+                                 HistoryWriter historyWriter, HistoryDatabase historyDb,
                                  HtmlReportWriter htmlReportWriter, boolean json, PrintStream out,
                                  ProgressListener progress) throws IOException {
         List<String> lines = Files.readAllLines(Path.of(batchPath));
@@ -364,6 +391,7 @@ public final class Main implements Callable<Integer> {
             RiskScore score = scorer.score(result.signals(), domainAge);
             // Written per item, inside the scan loop, so an interrupted batch still leaves partial history.
             historyWriter.record(url, HistoryWriter.TargetType.URL, score, domainAge);
+            historyDb.recordUrl(url, result.components(), score, domainAge);
             entries.add(new AnalysisEntry(url, score, HistoryWriter.TargetType.URL, domainAge));
             progress.onProgress(i + 1, total);
         }

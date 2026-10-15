@@ -3,9 +3,14 @@ package com.phishnet.api;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.phishnet.analyzer.WhoisClient;
+import com.phishnet.cli.HistoryWriter;
+import com.phishnet.history.HistoryDatabase;
+import com.phishnet.history.HistoryEntry;
+import com.phishnet.history.HistoryFilter;
 import com.phishnet.model.PhishNetConfig;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -16,6 +21,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.time.LocalDate;
 import java.util.Arrays;
 import java.util.List;
@@ -368,5 +374,29 @@ class ApiServerTest {
         assertTrue(server.port() > 0);
         server.stop();
         server = null;
+    }
+
+    // --- scan history ----------------------------------------------------------
+
+    @Test
+    void apiScansAreRecordedInHistoryDatabase(@TempDir Path tempDir) throws Exception {
+        Path database = tempDir.resolve("history.db");
+        HistoryDatabase history = new HistoryDatabase(database, true,
+                new PrintStream(serverLog, true, StandardCharsets.UTF_8));
+        server = new ApiServer(new ScanService(PhishNetConfig.defaultConfig(), null, history),
+                new PrintStream(serverLog, true, StandardCharsets.UTF_8)).start(0);
+
+        assertEquals(200, postJson("/api/scan/url", "{\"url\":\"http://192.168.1.1/login\"}").status());
+        assertEquals(200, postMultipart("/api/scan/email", ApiServer.EMAIL_UPLOAD_FIELD, "suspicious.eml",
+                fixture("phishing_sender_mismatch.eml")).status());
+        // Rejected requests never reach the scanner, so they leave no history.
+        assertEquals(400, postJson("/api/scan/url", "{}").status());
+
+        List<HistoryEntry> entries = history.search(HistoryFilter.recent(0));
+        assertEquals(2, entries.size(), serverLog.toString(StandardCharsets.UTF_8));
+        assertEquals(HistoryWriter.TargetType.EMAIL, entries.get(0).type());
+        assertEquals("suspicious.eml", entries.get(0).target());
+        assertEquals(HistoryWriter.TargetType.URL, entries.get(1).type());
+        assertEquals("http://192.168.1.1/login", entries.get(1).target());
     }
 }

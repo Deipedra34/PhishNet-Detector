@@ -3,6 +3,7 @@ package com.phishnet.cli;
 import com.phishnet.analyzer.WhoisClient;
 import com.phishnet.api.ApiServer;
 import com.phishnet.api.ScanService;
+import com.phishnet.history.HistoryDatabase;
 import com.phishnet.model.PhishNetConfig;
 import com.phishnet.util.ConfigLoader;
 import picocli.CommandLine.Command;
@@ -57,6 +58,15 @@ final class ServeCommand implements Callable<Integer> {
             description = "Skip the live WHOIS domain-age lookup for URL scans")
     private boolean noWhois;
 
+    @Option(names = "--history-db", paramLabel = "<path>",
+            description = "Record API scans in this SQLite database "
+                    + "(default: ~/.phishnet/phishnet-history.db; query it with: phishnet history)")
+    private String databaseFile;
+
+    @Option(names = "--no-history-db",
+            description = "Do not record API scans in the scan history database")
+    private boolean noHistoryDb;
+
     private final PrintStream out;
     private final PrintStream err;
     private final WhoisClient whoisClient;
@@ -84,8 +94,11 @@ final class ServeCommand implements Callable<Integer> {
             return 1;
         }
 
-        // null = --no-whois, same convention as the CLI scan modes.
-        ApiServer server = new ApiServer(new ScanService(config, noWhois ? null : whoisClient), err);
+        // null = --no-whois / --no-history-db, same convention as the CLI scan modes.
+        // The database is only created on the first recorded scan.
+        HistoryDatabase history = noHistoryDb ? null : new HistoryDatabase(
+                databaseFile != null ? Path.of(databaseFile) : HistoryDatabase.defaultPath(), true, err);
+        ApiServer server = new ApiServer(new ScanService(config, noWhois ? null : whoisClient, history), err);
         try {
             server.start(port);
         } catch (RuntimeException e) {
@@ -98,6 +111,9 @@ final class ServeCommand implements Callable<Integer> {
         out.println("  GET  /api/health");
         out.println("  POST /api/scan/url");
         out.println("  POST /api/scan/email");
+        if (history != null) {
+            out.println("Recording scans to " + history.file());
+        }
         return 0;
     }
 }

@@ -1,6 +1,9 @@
 package com.phishnet.cli;
 
 import com.phishnet.analyzer.WhoisClient;
+import com.phishnet.history.HistoryDatabase;
+import com.phishnet.history.HistoryEntry;
+import com.phishnet.history.HistoryFilter;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -17,6 +20,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MainTest {
@@ -47,8 +51,16 @@ class MainTest {
         boolean touchesHistory = Arrays.stream(args)
                 .anyMatch(a -> a.equals("--history-file") || a.equals("--no-history"));
         if (!touchesHistory) {
-            effectiveArgs = Arrays.copyOf(args, args.length + 1);
-            effectiveArgs[args.length] = "--no-history";
+            effectiveArgs = Arrays.copyOf(effectiveArgs, effectiveArgs.length + 1);
+            effectiveArgs[effectiveArgs.length - 1] = "--no-history";
+        }
+        // Same for the SQLite history, which defaults to ~/.phishnet/: never let the
+        // suite write into the real user's history database.
+        boolean touchesHistoryDb = Arrays.stream(args)
+                .anyMatch(a -> a.equals("--history-db") || a.equals("--no-history-db"));
+        if (!touchesHistoryDb) {
+            effectiveArgs = Arrays.copyOf(effectiveArgs, effectiveArgs.length + 1);
+            effectiveArgs[effectiveArgs.length - 1] = "--no-history-db";
         }
 
         ByteArrayOutputStream outBytes = new ByteArrayOutputStream();
@@ -498,6 +510,123 @@ class MainTest {
         assertEquals(0, result.exitCode());
         assertTrue(result.stdout().contains("Risk Score"));
         assertTrue(result.stderr().contains("could not write scan history"));
+    }
+
+    // --- scan history database (SQLite) -------------------------------------------
+
+    private static List<HistoryEntry> readHistoryDb(Path database) throws Exception {
+        return new HistoryDatabase(database, false, System.err).search(HistoryFilter.recent(0));
+    }
+
+    @Test
+    void urlScanIsRecordedInDatabaseAndCsv(@TempDir Path tempDir) throws Exception {
+        Path csv = tempDir.resolve("history.csv");
+        Path database = tempDir.resolve("nested").resolve("history.db");
+
+        Captured result = runMain("--url", "http://192.168.1.1/login",
+                "--history-file", csv.toString(), "--history-db", database.toString());
+
+        assertEquals(0, result.exitCode(), result.stderr());
+        assertEquals(2, Files.readAllLines(csv, StandardCharsets.UTF_8).size(), "CSV history still written");
+        List<HistoryEntry> entries = readHistoryDb(database);
+        assertEquals(1, entries.size());
+        HistoryEntry entry = entries.get(0);
+        assertEquals("http://192.168.1.1/login", entry.target());
+        assertEquals(HistoryWriter.TargetType.URL, entry.type());
+        assertEquals("192.168.1.1", entry.domain());
+        assertTrue(entry.reasons().stream().anyMatch(r -> r.id().equals("ipAddressHost")), entry.reasons().toString());
+        assertNull(entry.domainAgeDays(), "--no-whois leaves domain age empty");
+    }
+
+    @Test
+    void noHistoryDbFlagSkipsDatabaseButKeepsCsv(@TempDir Path tempDir) throws Exception {
+        Path csv = tempDir.resolve("history.csv");
+        Path database = tempDir.resolve("history.db");
+
+        Captured result = runMain("--url", "https://example.com", "--history-file", csv.toString(),
+                "--history-db", database.toString(), "--no-history-db");
+
+        assertEquals(0, result.exitCode(), result.stderr());
+        assertFalse(Files.exists(database));
+        assertEquals(2, Files.readAllLines(csv, StandardCharsets.UTF_8).size());
+    }
+
+    @Test
+    void noHistoryFlagSkipsCsvButKeepsDatabase(@TempDir Path tempDir) throws Exception {
+        Path csv = tempDir.resolve("history.csv");
+        Path database = tempDir.resolve("history.db");
+
+        Captured result = runMain("--url", "https://example.com", "--history-file", csv.toString(),
+                "--no-history", "--history-db", database.toString());
+
+        assertEquals(0, result.exitCode(), result.stderr());
+        assertFalse(Files.exists(csv));
+        assertEquals(1, readHistoryDb(database).size());
+    }
+
+    @Test
+    void batchModeRecordsOneDatabaseRowPerItem(@TempDir Path tempDir) throws Exception {
+        Path batchFile = tempDir.resolve("urls.txt");
+        Files.writeString(batchFile,
+                "https://example.com\n# skipped\nhttp://192.168.1.1/login\nhttp://free-prize.tk\n",
+                StandardCharsets.UTF_8);
+        Path database = tempDir.resolve("history.db");
+
+        Captured result = runMain("--batch", batchFile.toString(), "--json", "--history-db", database.toString());
+
+        assertEquals(0, result.exitCode(), result.stderr());
+        List<HistoryEntry> entries = readHistoryDb(database);
+        // Newest first.
+        assertEquals(List.of("http://free-prize.tk", "http://192.168.1.1/login", "https://example.com"),
+                entries.stream().map(HistoryEntry::target).toList());
+        assertEquals("free-prize.tk", entries.get(0).domain());
+    }
+
+    @Test
+    void emailScanIsRecordedInDatabaseWithSenderDomainAndSubject(@TempDir Path tempDir) throws Exception {
+        Path emlFile = tempDir.resolve("phish.eml");
+        Files.writeString(emlFile,
+                "From: \"PayPal\" <alert@Random-Mailer.info>\n"
+                        + "To: victim@example.com\n"
+                        + "Subject: Verify immediately\n"
+                        + "Content-Type: text/plain; charset=UTF-8\n\n"
+                        + "Your account will be suspended. Verify immediately: http://192.168.1.1/login\n",
+                StandardCharsets.UTF_8);
+        Path database = tempDir.resolve("history.db");
+
+        Captured result = runMain("--email", emlFile.toString(), "--quiet", "--history-db", database.toString());
+
+        List<HistoryEntry> entries = readHistoryDb(database);
+        assertEquals(1, entries.size(), result.stderr());
+        HistoryEntry entry = entries.get(0);
+        assertEquals(HistoryWriter.TargetType.EMAIL, entry.type());
+        assertEquals(emlFile.toString(), entry.target());
+        assertEquals("random-mailer.info", entry.domain());
+        assertEquals("Verify immediately", entry.subject());
+        assertTrue(entry.reasons().stream().anyMatch(r -> r.id().equals("senderMismatch")), entry.reasons().toString());
+    }
+
+    @Test
+    void historyDbWriteFailureWarnsButDoesNotFailScan(@TempDir Path tempDir) {
+        // A directory can't be opened as an SQLite database.
+        Path databaseDir = tempDir.resolve("db-as-dir");
+        assertTrue(databaseDir.toFile().mkdir());
+
+        Captured result = runMain("--url", "https://example.com", "--history-db", databaseDir.toString());
+
+        assertEquals(0, result.exitCode());
+        assertTrue(result.stdout().contains("Risk Score"));
+        assertTrue(result.stderr().contains("could not write scan history database"), result.stderr());
+    }
+
+    @Test
+    void helpListsHistoryDatabaseOptionsAndCommand() {
+        Captured result = runMain("--help");
+
+        assertEquals(0, result.exitCode());
+        assertTrue(result.stdout().contains("--history-db"));
+        assertTrue(result.stdout().contains("--no-history-db"));
+        assertTrue(result.stdout().contains("phishnet history list"));
     }
 
     // --- HTML report ------------------------------------------------------------
