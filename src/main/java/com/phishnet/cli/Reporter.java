@@ -1,5 +1,6 @@
 package com.phishnet.cli;
 
+import com.phishnet.ml.MlPrediction;
 import com.phishnet.model.DomainAgeResult;
 import com.phishnet.model.EmailAnalysisResult;
 import com.phishnet.model.RiskLevel;
@@ -41,13 +42,19 @@ public final class Reporter {
     }
 
     public void reportUrl(String target, UrlAnalysisResult result, RiskScore score, DomainAgeResult domainAge) {
+        reportUrl(target, result, score, domainAge, null);
+    }
+
+    /** @param ml the ML layer's prediction, or {@code null} when ML is off or produced none */
+    public void reportUrl(String target, UrlAnalysisResult result, RiskScore score, DomainAgeResult domainAge,
+                          MlPrediction ml) {
         if (level == OutputLevel.QUIET) {
             printQuietLine(target, score);
             return;
         }
-        printSummary(target, score, domainAge);
+        printSummary(target, score, domainAge, ml);
         if (level == OutputLevel.VERBOSE) {
-            printUrlDetails(result.components());
+            printUrlDetails(result.components(), ml);
         }
     }
 
@@ -56,18 +63,23 @@ public final class Reporter {
             printQuietLine(target, score);
             return;
         }
-        printSummary(target, score, DomainAgeResult.skipped());
+        printSummary(target, score, DomainAgeResult.skipped(), null);
         if (level == OutputLevel.VERBOSE) {
             printEmailDetails(result);
         }
     }
 
     public void reportBatchEntry(AnalysisEntry entry) {
+        reportBatchEntry(entry, null);
+    }
+
+    /** @param ml the ML layer's prediction for this entry, or {@code null} */
+    public void reportBatchEntry(AnalysisEntry entry, MlPrediction ml) {
         if (level == OutputLevel.QUIET) {
             printQuietLine(entry.label(), entry.score());
             return;
         }
-        printSummary(entry.label(), entry.score(), entry.domainAge());
+        printSummary(entry.label(), entry.score(), entry.domainAge(), ml);
         out.println("---");
     }
 
@@ -80,10 +92,11 @@ public final class Reporter {
 
     // --- summary block, shared by NORMAL and VERBOSE ------------------------
 
-    private void printSummary(String target, RiskScore score, DomainAgeResult domainAge) {
+    private void printSummary(String target, RiskScore score, DomainAgeResult domainAge, MlPrediction ml) {
         out.println("Target: " + target);
         out.println("Risk Score: " + score.score() + "/100 (" + coloredLevel(score.level()) + ")");
         printDomainAge(domainAge);
+        printMlConfidence(ml);
 
         if (score.signals().isEmpty()) {
             out.println(AnsiColor.apply("✓", colorEnabled, AnsiColor.GREEN) + " No phishing indicators detected");
@@ -125,11 +138,25 @@ public final class Reporter {
         out.println(line);
     }
 
-    private void printUrlDetails(UrlComponents c) {
+    /**
+     * "ML Confidence: 73% phishing-like (experimental)" - printed right under the
+     * rule-based score, which stays the authoritative one. Nothing when ML is off.
+     */
+    private void printMlConfidence(MlPrediction ml) {
+        if (ml == null) {
+            return;
+        }
+        out.println("ML Confidence: " + ml.displayPercent() + " phishing-like (experimental)");
+    }
+
+    private void printUrlDetails(UrlComponents c, MlPrediction ml) {
         out.println("Details:");
         out.println("  scheme=" + c.scheme() + ", host=" + c.host() + ", subdomain=" + c.subdomain()
                 + ", domain=" + c.domain() + ", tld=" + c.tld() + ", ip=" + c.isIpHost());
         out.println("  path=" + c.path() + ", query params=" + c.queryParams().size());
+        if (ml != null) {
+            out.println("  ml features: " + ml.features());
+        }
     }
 
     private void printEmailDetails(EmailAnalysisResult result) {

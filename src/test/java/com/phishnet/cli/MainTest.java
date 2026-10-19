@@ -62,6 +62,13 @@ class MainTest {
             effectiveArgs = Arrays.copyOf(effectiveArgs, effectiveArgs.length + 1);
             effectiveArgs[effectiveArgs.length - 1] = "--no-history-db";
         }
+        // And for the ML model, which is trained and saved to ~/.phishnet/ on first use:
+        // unless a test is exercising the ML layer, turn it off.
+        boolean touchesMl = Arrays.stream(args).anyMatch(a -> a.equals("--model") || a.equals("--no-ml"));
+        if (!touchesMl) {
+            effectiveArgs = Arrays.copyOf(effectiveArgs, effectiveArgs.length + 1);
+            effectiveArgs[effectiveArgs.length - 1] = "--no-ml";
+        }
 
         ByteArrayOutputStream outBytes = new ByteArrayOutputStream();
         ByteArrayOutputStream errBytes = new ByteArrayOutputStream();
@@ -816,6 +823,145 @@ class MainTest {
         Captured result = runMain("--help");
         assertTrue(result.stdout().contains("--no-whois"));
         assertTrue(result.stdout().contains("Network options:"));
+    }
+
+    // --- experimental ML layer --------------------------------------------------
+
+    @Test
+    void mlConfidenceIsShownAlongsideTheRuleBasedScore(@TempDir Path tempDir) {
+        Path model = tempDir.resolve("model.json");
+
+        Captured result = runMain("--url", "http://paypa1-secure-login.tk/verify", "--model", model.toString());
+
+        assertEquals(0, result.exitCode());
+        assertEquals("", result.stderr());
+        List<String> lines = result.stdout().lines().toList();
+        int scoreLine = lines.indexOf(riskScoreLine(result.stdout()));
+        assertTrue(lines.get(scoreLine + 1).matches("ML Confidence: (<1|>99|\\d{1,2})% phishing-like \\(experimental\\)"),
+                result.stdout());
+        assertTrue(Files.exists(model), "first use trains and saves the model");
+    }
+
+    @Test
+    void mlLayerLeavesTheRuleBasedReportUnchanged(@TempDir Path tempDir) {
+        String url = "http://paypa1-secure-login.tk/verify?redirect=http://evil.tk/x";
+
+        Captured withMl = runMain("--url", url, "--model", tempDir.resolve("model.json").toString());
+        Captured withoutMl = runMain("--url", url, "--no-ml");
+
+        List<String> withMlMinusMlLine = withMl.stdout().lines()
+                .filter(l -> !l.startsWith("ML Confidence:"))
+                .toList();
+        assertEquals(withoutMl.stdout().lines().toList(), withMlMinusMlLine);
+    }
+
+    @Test
+    void obviousPhishingScoresHigherThanObviousLegitimate(@TempDir Path tempDir) {
+        String model = tempDir.resolve("model.json").toString();
+
+        int phishing = mlPercent(runMain("--url", "http://paypa1-secure-login.tk/verify", "--model", model).stdout());
+        int legitimate = mlPercent(runMain("--url", "https://www.google.com/", "--model", model).stdout());
+
+        assertTrue(phishing > legitimate, phishing + " vs " + legitimate);
+    }
+
+    @Test
+    void verboseModeShowsMlFeatures(@TempDir Path tempDir) {
+        Captured result = runMain("--url", "https://example.com/login", "--verbose",
+                "--model", tempDir.resolve("model.json").toString());
+
+        assertTrue(result.stdout().contains("ML Confidence:"), result.stdout());
+        assertTrue(result.stdout().contains("  ml features: url_length=25, "), result.stdout());
+    }
+
+    @Test
+    void noMlFlagSkipsTheMlPathEntirely(@TempDir Path tempDir) throws Exception {
+        Path model = tempDir.resolve("model.json");
+
+        Captured result = runMain("--url", "http://paypa1.com/login", "--verbose", "--no-ml",
+                "--model", model.toString());
+
+        assertEquals(0, result.exitCode());
+        assertEquals("", result.stderr());
+        assertFalse(result.stdout().contains("ML Confidence"), result.stdout());
+        assertFalse(result.stdout().contains("ml features"), result.stdout());
+        assertFalse(Files.exists(model), "--no-ml must not train or save a model");
+
+        // Not even read: a corrupt model file produces no warning under --no-ml.
+        Files.writeString(model, "corrupt");
+        Captured withCorruptModel = runMain("--url", "http://paypa1.com/login", "--no-ml", "--model", model.toString());
+        assertEquals(0, withCorruptModel.exitCode());
+        assertEquals("", withCorruptModel.stderr());
+        assertEquals("corrupt", Files.readString(model));
+    }
+
+    @Test
+    void noMlFlagWorksInBatchMode(@TempDir Path tempDir) throws Exception {
+        Path urls = tempDir.resolve("urls.txt");
+        Files.writeString(urls, "https://example.com\nhttp://192.168.1.1/login\n");
+
+        Captured result = runMain("--batch", urls.toString(), "--no-ml");
+
+        assertEquals(0, result.exitCode());
+        assertEquals("", result.stderr());
+        assertFalse(result.stdout().contains("ML Confidence"));
+        assertTrue(result.stdout().contains("Summary: 2 URL(s) analyzed"));
+    }
+
+    @Test
+    void corruptModelWarnsButScanStillCompletes(@TempDir Path tempDir) throws Exception {
+        Path model = tempDir.resolve("model.json");
+        Files.writeString(model, "{ not a model");
+
+        Captured result = runMain("--url", "http://paypa1.com/login", "--model", model.toString());
+
+        assertEquals(0, result.exitCode());
+        assertTrue(result.stderr().contains("Warning: ML model"), result.stderr());
+        assertTrue(result.stdout().contains("Risk Score:"));
+        assertFalse(result.stdout().contains("ML Confidence"));
+    }
+
+    @Test
+    void batchModeShowsMlConfidencePerEntry(@TempDir Path tempDir) throws Exception {
+        Path urls = tempDir.resolve("urls.txt");
+        Files.writeString(urls, "https://example.com\nhttp://192.168.1.1/login\nhttp://\n");
+
+        Captured result = runMain("--batch", urls.toString(), "--model", tempDir.resolve("model.json").toString());
+
+        assertEquals(0, result.exitCode());
+        // The malformed "http://" has nothing to classify, so only two of three entries get a line.
+        assertEquals(2, countOccurrences(result.stdout(), "ML Confidence:"), result.stdout());
+    }
+
+    @Test
+    void mlIsNotComputedForJsonQuietOrEmailOutput(@TempDir Path tempDir) throws Exception {
+        Path model = tempDir.resolve("model.json");
+        Path eml = tempDir.resolve("mail.eml");
+        Files.writeString(eml, "From: a@example.com\nSubject: hi\nContent-Type: text/plain\n\nhello http://paypa1.com\n");
+
+        Captured json = runMain("--url", "http://paypa1.com", "--json", "--model", model.toString());
+        Captured quiet = runMain("--url", "http://paypa1.com", "--quiet", "--model", model.toString());
+        Captured email = runMain("--email", eml.toString(), "--model", model.toString());
+
+        assertFalse(json.stdout().toLowerCase().contains("ml confidence"), json.stdout());
+        assertFalse(json.stdout().toLowerCase().contains("mlconfidence"), json.stdout());
+        assertEquals(1, quiet.stdout().strip().lines().count());
+        assertFalse(email.stdout().contains("ML Confidence"), email.stdout());
+        assertFalse(Files.exists(model), "the model is only loaded when its output will be shown");
+    }
+
+    @Test
+    void helpListsMlOptionsAndModelCommand() {
+        Captured result = runMain("--help");
+        assertTrue(result.stdout().contains("--no-ml"));
+        assertTrue(result.stdout().contains("--model=<path>"));
+        assertTrue(result.stdout().contains("phishnet model info"));
+    }
+
+    private static int mlPercent(String stdout) {
+        String line = stdout.lines().filter(l -> l.startsWith("ML Confidence: ")).findFirst().orElseThrow();
+        String value = line.substring("ML Confidence: ".length(), line.indexOf('%'));
+        return value.equals(">99") ? 100 : value.equals("<1") ? 0 : Integer.parseInt(value);
     }
 
     private static String riskScoreLine(String stdout) {

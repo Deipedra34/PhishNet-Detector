@@ -18,6 +18,13 @@ It runs as a command-line tool by default, and can optionally run as a small
 JSON REST API server (`phishnet serve`) exposing the same URL and email
 scanning over HTTP - see [REST API (serve mode)](#rest-api-serve-mode).
 
+An experimental machine-learning layer adds a second opinion next to that
+score: a small logistic regression model, trained on a bundled example
+dataset, that reports how phishing-like a URL looks ("ML Confidence: 73%
+phishing-like"). It's an extra signal only - the rule-based score stays the
+authoritative one - and `--no-ml` turns it off. See
+[Machine Learning Layer (experimental)](#machine-learning-layer-experimental).
+
 ## Contents
 
 - [What it detects](#what-it-detects)
@@ -26,6 +33,7 @@ scanning over HTTP - see [REST API (serve mode)](#rest-api-serve-mode).
 - [Setup](#setup)
 - [Usage](#usage)
 - [Scan History](#scan-history)
+- [Machine Learning Layer (experimental)](#machine-learning-layer-experimental)
 - [REST API (serve mode)](#rest-api-serve-mode)
 - [Docker](#docker)
 - [Configuration](#configuration)
@@ -137,6 +145,13 @@ validates HTTP input, and `ScanService` calls the exact same `UrlAnalyzer` /
 `DomainAgeChecker` / `EmailAnalyzer` / `RiskScorer` sequence the CLI does,
 reusing `ReportFormatter`'s JSON structure for its responses.
 
+The experimental ML layer (`com.phishnet.ml`) sits beside `RiskScorer`, not in
+front of it: `FeatureExtractor` reads a numeric feature vector off the
+`UrlAnalysisResult` and WHOIS result the pipeline already produced, and
+`MlScorer` turns that into a probability that `Reporter` prints under the risk
+score. Nothing in the rule-based path reads it - see
+[Machine Learning Layer (experimental)](#machine-learning-layer-experimental).
+
 ## How scoring works
 
 1. Every analyzer run produces a `List<Signal>`, each with a stable id such
@@ -188,7 +203,8 @@ Usage:
 phishnet [-hV] [--config=<path>] (--url=<url> | --email=<file.eml> |
          --batch=<file>) [[--json] [--no-color]] [-v | -q]
          [[--history-file=<path>] [--no-history] [--history-db=<path>]
-         [--no-history-db]] [[--html-report=<path>]] [[--no-whois]]
+         [--no-history-db]] [[--html-report=<path>]] [[--no-whois]] [[--no-ml]
+         [--model=<path>]]
 
 Analyzes URLs, TLS certificates, and .eml email files for phishing indicators,
 and combines whatever it finds into a single 0-100 risk score with a
@@ -238,19 +254,29 @@ Network options:
                                offline/fast scans or CI); domain age is then
                                left out of the score entirely
 
+Machine learning options (experimental):
+      --no-ml                Skip the experimental ML phishing-probability
+                               signal entirely; the rule-based risk score is
+                               unaffected
+      --model=<path>         ML model file, trained from the bundled dataset on
+                               first use if missing (default: ~/.
+                               phishnet/phishnet-model.json; see: phishnet
+                               model --help)
+
 Examples:
   phishnet --url https://example.com
   phishnet --email suspicious.eml --verbose
   phishnet --batch urls.txt --json
   phishnet serve --port 8080   (REST API mode; see: phishnet serve --help)
   phishnet history list        (past scans; see: phishnet history --help)
+  phishnet model info          (ML model details; see: phishnet model --help)
 
 See the project README for the full option reference and sample output.
 ```
 
 ```
 $ java -jar target/phishnet.jar --version
-phishnet 2.2.0
+phishnet 2.3.0
 ```
 
 `--version` always reflects the version actually built (Maven filters it into
@@ -309,6 +335,13 @@ java -jar target/phishnet.jar --batch urls.txt --html-report scan-report.html
 
 # Offline/fast scan: skip the WHOIS domain-age lookup entirely
 java -jar target/phishnet.jar --batch urls.txt --no-whois
+
+# Leave out the experimental ML confidence line (see Machine Learning Layer below)
+java -jar target/phishnet.jar --url "https://example.com" --no-ml
+
+# Retrain the ML model, or show what the current one was trained on
+java -jar target/phishnet.jar model train
+java -jar target/phishnet.jar model info
 ```
 
 Output is colored automatically when stdout is a real terminal (HIGH=red, MEDIUM=yellow, LOW=green,
@@ -447,6 +480,7 @@ failure handling as the scan history CSV.
 $ java -jar target/phishnet.jar --url "http://paypa1-secure-login.tk/verify?redirect=http://evil.tk/x"
 Target: http://paypa1-secure-login.tk/verify?redirect=http://evil.tk/x
 Risk Score: 70/100 (HIGH)
+ML Confidence: >99% phishing-like (experimental)
 Signals:
   ✗ [suspiciousTld] URL uses a TLD commonly abused for phishing
   ✗ [typosquatting] Domain segment 'paypa1' closely resembles brand 'paypal' (edit distance 1)
@@ -457,7 +491,8 @@ Recommendation: High risk of phishing. Do not click any links, enter credentials
 ```
 $ java -jar target/phishnet.jar --url "http://paypa1-secure-login.tk/verify" --verbose
 Target: http://paypa1-secure-login.tk/verify
-Risk Score: 55/100 (MEDIUM)
+Risk Score: 50/100 (MEDIUM)
+ML Confidence: 99% phishing-like (experimental)
 Signals:
   ⚠ [suspiciousTld] URL uses a TLD commonly abused for phishing (.tk)
   ⚠ [typosquatting] Domain segment 'paypa1' closely resembles brand 'paypal' (edit distance 1) (paypa1-secure-login.tk)
@@ -465,6 +500,7 @@ Recommendation: Some phishing indicators found. Proceed with caution: verify the
 Details:
   scheme=http, host=paypa1-secure-login.tk, subdomain=, domain=paypa1-secure-login, tld=tk, ip=false
   path=/verify, query params=0
+  ml features: url_length=36, special_chars=2, dot_count=1, subdomain_count=0, ip_host=0, brand_distance=1, typosquatting=1, homograph=0, suspicious_tld=1, url_shortener=0, domain_age_days=?, https=0
 ```
 
 ```
@@ -619,6 +655,152 @@ A connection is opened per scan, so an interrupted `--batch` keeps every row
 recorded so far, and a CLI scan and a running `serve` process can safely share
 the same file. All queries use bound parameters - search text is never
 interpreted as SQL.
+
+## Machine Learning Layer (experimental)
+
+On top of the rule-based scoring engine, PhishNet can show a second, independent
+opinion for each scanned URL: a phishing probability from a small machine-learning
+classifier.
+
+```
+Risk Score: 70/100 (HIGH)
+ML Confidence: >99% phishing-like (experimental)
+```
+
+**This is a simple, educational implementation, not a production-grade ML
+pipeline.** The model is a hand-written logistic regression (plain Java, no ML
+framework, no new dependencies) trained on a small bundled dataset of about a
+hundred example rows. It will be confidently wrong on URLs unlike anything in
+that data, and it has never been validated against a real-world phishing feed.
+Treat its number as a talking point, not a verdict.
+
+### An extra signal, not a replacement
+
+The rule-based `Risk Score` and its LOW/MEDIUM/HIGH level are computed exactly as
+before and remain the authoritative result: they alone drive the recommendation,
+the `--quiet` exit code, `--json` output, scan history (CSV and SQLite), the HTML
+report, and the REST API. The ML layer only adds the one `ML Confidence` line to
+the human-readable report. Concretely:
+
+- Shown in NORMAL and `--verbose` output for `--url` and `--batch` scans, right
+  under the risk score. `--verbose` also prints the feature values it used
+  (`ml features: ...`) in the Details section.
+- Never shown (and the model is not even loaded) for `--quiet`, `--json`, and
+  `--email` scans, or with `--no-ml`.
+- A malformed URL gets no ML line - there's nothing to classify.
+- Very high or low probabilities are shown as `>99%` / `<1%`; a model trained on
+  this little data is never actually certain.
+
+### How it works
+
+1. **Feature extraction** (`FeatureExtractor`). No URL is parsed twice: the
+   features are read off what the analyzers already produced - the parsed URL
+   components, the signal ids `UrlAnalyzer` raised, and the WHOIS result - into a
+   fixed 12-number vector:
+
+   | Feature | Meaning |
+   |---|---|
+   | `url_length` | Characters in the full URL |
+   | `special_chars` | Characters other than letters, digits, `.`, `:` and `/` (e.g. `-` `_` `@` `?` `=` `%`) |
+   | `dot_count` | Dots in the host name |
+   | `subdomain_count` | Labels before the registrable domain (0 for IP hosts) |
+   | `ip_host` | 1 if the host is a raw IP address |
+   | `brand_distance` | Smallest edit distance from any `-`/`_` segment of the domain to a configured brand, capped at 10 (`paypal-secure-login` → 0, `paypa1` → 1; a brand's own domain also counts as 10) |
+   | `typosquatting`, `homograph`, `suspicious_tld`, `url_shortener` | 1 if that rule-based signal fired |
+   | `domain_age_days` | WHOIS domain age; unknown when WHOIS is skipped (`--no-whois`, IP hosts) or fails |
+   | `https` | 1 if the scheme is `https` |
+
+2. **Classifier** (`LogisticRegression`). Each feature is standardized using the
+   training data's mean and standard deviation, then combined with learned
+   weights and squashed through the logistic function into a 0-1 probability.
+   An unknown value (like a missing domain age) is treated as the training
+   average, so it neither raises nor lowers the score. Training is full-batch
+   gradient descent with a small L2 penalty, starting from zero weights with no
+   randomness, so the same data always produces the same model.
+
+3. **Model file** (`MlModel`). The learned parameters plus some metadata
+   (training time, dataset, example counts, training accuracy) are saved as JSON
+   to `~/.phishnet/phishnet-model.json`, next to the scan history database, so
+   training only happens once. Use `--model <path>` on a scan to load a different
+   file.
+
+The first scan that needs the model trains it from the bundled dataset
+(`src/main/resources/training-data.csv`, shipped inside the jar) and saves it -
+this takes well under a second. After that, scans just load the file.
+
+### Commands
+
+```
+phishnet model train [--data <path>] [--model <path>]
+phishnet model info  [--model <path>]
+```
+
+- `phishnet model train` retrains from the bundled dataset and overwrites the
+  model file. Pass `--data my-data.csv` to train on your own labeled data
+  instead.
+- `phishnet model info` shows the current model: when it was trained, on which
+  dataset and how many examples, its training accuracy, and the learned weight
+  for each feature (positive pushes toward phishing, negative toward legitimate).
+
+```
+$ java -jar target/phishnet.jar model info
+Model file:        /home/me/.phishnet/phishnet-model.json
+Algorithm:         logistic regression
+Trained:           2026-10-19T18:35:58Z
+Training data:     bundled training-data.csv
+Dataset size:      123 examples (60 phishing, 63 legitimate)
+Training accuracy: 95.1%
+Features (12):
+  url_length       +0.614
+  special_chars    +0.251
+  dot_count        -0.032
+  subdomain_count  -0.009
+  ip_host          +0.875
+  brand_distance   -0.771
+  typosquatting    +1.050
+  homograph        +0.262
+  suspicious_tld   +0.630
+  url_shortener    +0.817
+  domain_age_days  -1.614
+  https            -1.166
+  (bias)           -0.281
+Weights apply to standardized feature values: positive pushes toward phishing, negative toward legitimate.
+```
+
+(Training accuracy is measured on the same data the model was trained on, so it
+says nothing about how well it generalizes.)
+
+### Training on your own data
+
+`--data` takes a CSV file in the same format as the bundled one:
+
+- A header row naming the columns: every feature from the table above plus
+  `label` (`1` = phishing, `0` = legitimate), in any order. Other columns are
+  ignored, so you can keep e.g. a notes column.
+- One row per example; plain numbers only. Leave `domain_age_days` empty when
+  it's unknown.
+- Lines starting with `#` and blank lines are skipped.
+- At least one phishing and one legitimate row.
+
+```
+url_length,special_chars,dot_count,subdomain_count,ip_host,brand_distance,typosquatting,homograph,suspicious_tld,url_shortener,domain_age_days,https,label
+39,1,1,0,0,1,1,0,0,0,26,0,1
+29,0,2,1,0,10,0,0,0,0,9000,1,0
+```
+
+The simplest way to produce rows is to scan URLs with `--verbose` and copy the
+`ml features` values.
+
+### Turning it off, and failure handling
+
+- `--no-ml` skips the ML layer entirely for that scan: the model file is not
+  read, trained, or written. Like `--no-whois` and `--no-history-db`, it only
+  affects that one run.
+- The ML layer can never break a scan. A model file that's corrupt, unreadable,
+  or from an incompatible version prints one warning to stderr and the scan
+  completes without the ML line; `phishnet model train` replaces it. If a
+  freshly trained model can't be saved (e.g. a read-only home directory), it's
+  still used for that run and trained again next time.
 
 ## REST API (serve mode)
 
@@ -948,6 +1130,11 @@ docker run --rm -v phishnet-history:/home/phishnet/.phishnet \
   ghcr.io/deipedra34/phishnet-detector history list
 ```
 
+The [ML layer's](#machine-learning-layer-experimental) model file is saved in the
+same directory (`phishnet-model.json`), so that volume keeps it too. Without one,
+each container just retrains it from the bundled dataset on its first scan, which
+takes well under a second.
+
 ### Serve mode
 
 Publish the API port with `-p` (the image exposes `8080`, the default port):
@@ -1065,6 +1252,14 @@ listing, target/risk/type/date filters, LIKE-wildcard and SQL-injection-style
 search text, stats aggregation, write failures) against a fresh database file
 in a JUnit temp directory per test, so the suite never touches your real
 `~/.phishnet` history; `HistoryCommandTest` drives `phishnet history` end to end.
+The ML layer's tests (`com.phishnet.ml`) check feature extraction against known
+URLs, train the classifier on small, obviously separable synthetic data and
+assert only directional results (which side of 0.5 a held-out example lands on,
+never exact probabilities), cover CSV parsing and model-file validation, and
+confirm that a missing model is trained on first use while a corrupt one only
+warns; `ModelCommandTest` drives `phishnet model` end to end, and `MainTest`
+checks that `--no-ml` never touches the model file. Every one of them uses a model
+file in a JUnit temp directory, never `~/.phishnet`.
 Edge-case coverage includes empty/null/blank/whitespace-only and
 special-character-only input, multi-thousand-character URLs, malformed URLs
 (missing scheme, invalid characters, multiple `://`, trailing garbage),
@@ -1075,7 +1270,7 @@ or empty sections (brands, TLDs, weights).
 `mvn test` runs [JaCoCo](https://www.jacoco.org/jacoco/) automatically and
 generates an HTML report at `target/site/jacoco/index.html` - open that file
 in a browser for a line-by-line, package-by-package breakdown. The suite
-(380 tests as of this writing) maintains roughly **90% line / 80% branch**
+(449 tests as of this writing) maintains roughly **90% line / 80% branch**
 coverage overall; the biggest remaining gaps are `SslChecker`'s real-socket
 TLS handshake path and `SocketWhoisClient`'s port-43 I/O, which by design
 aren't exercised without a live network connection (the certificate-decision
@@ -1097,11 +1292,13 @@ src/main/java/com/phishnet/
   analyzer/   UrlAnalyzer, SslChecker, EmailAnalyzer, DomainAgeChecker, WhoisClient, SocketWhoisClient
   model/      Signal, RiskScore, UrlComponents, PhishNetConfig, ...
   scoring/    RiskScorer
-  cli/        Main (picocli @Command), ServeCommand, HistoryCommand, ReportFormatter, Reporter, HistoryReporter, OutputLevel, HistoryWriter, HtmlReportWriter
+  cli/        Main (picocli @Command), ServeCommand, HistoryCommand, ModelCommand, ReportFormatter, Reporter, HistoryReporter, OutputLevel, HistoryWriter, HtmlReportWriter
   history/    HistoryDatabase (SQLite scan history), HistoryEntry, HistoryFilter, HistoryStats
+  ml/         FeatureVector, FeatureExtractor, LogisticRegression, TrainingData, MlModel, MlScorer, MlPrediction (experimental ML layer)
   api/        ApiServer (Javalin routes, validation, JSON errors), ScanService (analyzer/scorer wrapper)
   util/       LevenshteinDistance, HomoglyphUtil, ConfigLoader, AnsiColor, ColorSupport
 src/main/resources/phishnet-config.yaml
+src/main/resources/training-data.csv  (bundled example dataset for the ML layer)
 src/main/resources/simplelogger.properties  (log levels for serve mode)
 src/main/resources/version.properties  (Maven-filtered; feeds --version, see Contributing)
 src/test/java/...            (mirrors the layout above)

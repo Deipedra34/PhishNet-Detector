@@ -1,6 +1,8 @@
 package com.phishnet.cli;
 
 import com.phishnet.analyzer.UrlAnalyzer;
+import com.phishnet.ml.FeatureVector;
+import com.phishnet.ml.MlPrediction;
 import com.phishnet.model.DomainAgeResult;
 import com.phishnet.model.EmailAnalysisResult;
 import com.phishnet.model.RiskLevel;
@@ -301,5 +303,55 @@ class ReporterTest {
                 new AnalysisEntry("https://example.com", highScore(), HistoryWriter.TargetType.URL, TEN_DAYS_OLD));
 
         assertTrue(buffer.toString(StandardCharsets.UTF_8).contains("Domain Age: 10 days"));
+    }
+
+    // --- ML confidence ----------------------------------------------------------
+
+    private static final MlPrediction ML_73 = new MlPrediction(0.73, new FeatureVector(new double[FeatureVector.SIZE]));
+
+    private String reportWithMl(OutputLevel level, MlPrediction ml) {
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        new Reporter(capture(buffer), level, false).reportUrl("https://example.com",
+                urlAnalyzer.analyze("https://example.com"), highScore(), DomainAgeResult.skipped(), ml);
+        return buffer.toString(StandardCharsets.UTF_8);
+    }
+
+    @Test
+    void mlConfidenceFollowsTheRiskScoreLine() {
+        List<String> lines = List.of(reportWithMl(OutputLevel.NORMAL, ML_73).split("\\r?\\n"));
+
+        assertEquals("Risk Score: 87/100 (HIGH)", lines.get(1));
+        assertEquals("ML Confidence: 73% phishing-like (experimental)", lines.get(2));
+    }
+
+    @Test
+    void verboseAddsMlFeaturesToDetails() {
+        String verbose = reportWithMl(OutputLevel.VERBOSE, ML_73);
+
+        assertTrue(verbose.contains("ML Confidence: 73% phishing-like (experimental)"), verbose);
+        assertTrue(verbose.contains("  ml features: url_length=0, "), verbose);
+    }
+
+    @Test
+    void noMlPredictionPrintsNoMlLines() {
+        String normal = reportWithMl(OutputLevel.NORMAL, null);
+        String verbose = reportWithMl(OutputLevel.VERBOSE, null);
+
+        assertFalse(normal.contains("ML"), normal);
+        assertFalse(verbose.contains("ML Confidence") || verbose.contains("ml features"), verbose);
+    }
+
+    @Test
+    void quietNeverShowsMlConfidence() {
+        assertEquals("HIGH 87 https://example.com", reportWithMl(OutputLevel.QUIET, ML_73).strip());
+    }
+
+    @Test
+    void batchEntryShowsItsMlConfidence() {
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        new Reporter(capture(buffer), OutputLevel.NORMAL, false).reportBatchEntry(
+                new AnalysisEntry("https://example.com", highScore()), ML_73);
+
+        assertTrue(buffer.toString(StandardCharsets.UTF_8).contains("ML Confidence: 73% phishing-like"));
     }
 }

@@ -6,6 +6,8 @@ import com.phishnet.analyzer.SocketWhoisClient;
 import com.phishnet.analyzer.UrlAnalyzer;
 import com.phishnet.analyzer.WhoisClient;
 import com.phishnet.history.HistoryDatabase;
+import com.phishnet.ml.MlPrediction;
+import com.phishnet.ml.MlScorer;
 import com.phishnet.model.DomainAgeResult;
 import com.phishnet.model.EmailAnalysisResult;
 import com.phishnet.model.PhishNetConfig;
@@ -58,6 +60,7 @@ import java.util.concurrent.Callable;
                 "  phishnet --batch urls.txt --json",
                 "  phishnet serve --port 8080   (REST API mode; see: phishnet serve --help)",
                 "  phishnet history list        (past scans; see: phishnet history --help)",
+                "  phishnet model info          (ML model details; see: phishnet model --help)",
                 "",
                 "See the project README for the full option reference and sample output."
         }
@@ -183,6 +186,23 @@ public final class Main implements Callable<Integer> {
         private boolean noWhois;
     }
 
+    // --- machine learning options ---------------------------------------------
+
+    @ArgGroup(exclusive = false, multiplicity = "0..1", heading = "%nMachine learning options (experimental):%n")
+    private MlOptions ml = new MlOptions();
+
+    private static final class MlOptions {
+        @Option(names = "--no-ml",
+                description = "Skip the experimental ML phishing-probability signal entirely; "
+                        + "the rule-based risk score is unaffected")
+        private boolean disabled;
+
+        @Option(names = "--model", paramLabel = "<path>",
+                description = "ML model file, trained from the bundled dataset on first use if missing "
+                        + "(default: ~/.phishnet/phishnet-model.json; see: phishnet model --help)")
+        private String modelFile;
+    }
+
     // -h/--help and -V/--version are handled automatically via mixinStandardHelpOptions.
 
     private PrintStream out;
@@ -222,6 +242,10 @@ public final class Main implements Callable<Integer> {
         if (args.length > 0 && args[0].equals(HISTORY_COMMAND)) {
             return execute(HistoryCommand.commandLine(out, err), Arrays.copyOfRange(args, 1, args.length), out, err);
         }
+        // ...and for "model", which manages the ML layer's model file.
+        if (args.length > 0 && args[0].equals(MODEL_COMMAND)) {
+            return execute(ModelCommand.commandLine(out, err), Arrays.copyOfRange(args, 1, args.length), out, err);
+        }
 
         Main app = new Main();
         app.out = out;
@@ -235,6 +259,9 @@ public final class Main implements Callable<Integer> {
 
     /** First argument that switches from a one-off scan to querying the scan history database. */
     static final String HISTORY_COMMAND = "history";
+
+    /** First argument that switches from a one-off scan to training/inspecting the ML model. */
+    static final String MODEL_COMMAND = "model";
 
     /** Applies the shared stream/color/error-handling setup, then parses and runs {@code cmd}. */
     private static int execute(CommandLine cmd, String[] args, PrintStream out, PrintStream err) {
@@ -298,17 +325,25 @@ public final class Main implements Callable<Integer> {
         // null = --no-whois: no lookups at all, every result is DomainAgeResult.skipped().
         DomainAgeChecker domainAgeChecker = network.noWhois ? null : new DomainAgeChecker(whoisClient);
 
+        // The ML confidence only appears in the human-readable URL report, so the model
+        // isn't even loaded for --no-ml, --json, --quiet, or --email runs. Loading never
+        // throws: a missing model is trained on first use, a corrupt one just warns.
+        boolean mlShown = !ml.disabled && !output.json && level != OutputLevel.QUIET && mode.emailPath == null;
+        MlScorer mlScorer = mlShown
+                ? MlScorer.open(ml.modelFile != null ? Path.of(ml.modelFile) : MlScorer.defaultPath(), config, err)
+                : MlScorer.disabled();
+
         try {
             if (mode.url != null) {
-                return runUrl(mode.url, urlAnalyzer, domainAgeChecker, scorer, formatter, reporter, historyWriter,
-                        historyDb, htmlReportWriter, output.json, out);
+                return runUrl(mode.url, urlAnalyzer, domainAgeChecker, scorer, mlScorer, formatter, reporter,
+                        historyWriter, historyDb, htmlReportWriter, output.json, out);
             } else if (mode.emailPath != null) {
                 return runEmail(mode.emailPath, emailAnalyzer, scorer, formatter, reporter, historyWriter,
                         historyDb, htmlReportWriter, output.json, out);
             } else {
                 ProgressListener progress = ProgressReporter.forBatch(
                         level, output.json, ColorSupport.isTty(), out, err, colorEnabled);
-                return runBatch(mode.batchPath, urlAnalyzer, domainAgeChecker, scorer, formatter, reporter,
+                return runBatch(mode.batchPath, urlAnalyzer, domainAgeChecker, scorer, mlScorer, formatter, reporter,
                         historyWriter, historyDb, htmlReportWriter, output.json, out, progress);
             }
         } catch (IOException e) {
@@ -326,7 +361,7 @@ public final class Main implements Callable<Integer> {
     }
 
     private static int runUrl(String url, UrlAnalyzer urlAnalyzer, DomainAgeChecker domainAgeChecker,
-                               RiskScorer scorer, ReportFormatter formatter, Reporter reporter,
+                               RiskScorer scorer, MlScorer mlScorer, ReportFormatter formatter, Reporter reporter,
                                HistoryWriter historyWriter, HistoryDatabase historyDb,
                                HtmlReportWriter htmlReportWriter, boolean json, PrintStream out) {
         UrlAnalysisResult result = urlAnalyzer.analyze(url);
@@ -339,7 +374,8 @@ public final class Main implements Callable<Integer> {
             out.println(formatter.json(url, score));
             return 0;
         }
-        reporter.reportUrl(url, result, score, domainAge);
+        MlPrediction mlPrediction = mlScorer.predict(result, domainAge).orElse(null);
+        reporter.reportUrl(url, result, score, domainAge, mlPrediction);
         return exitCodeFor(reporter.level(), score.level());
     }
 
@@ -369,7 +405,7 @@ public final class Main implements Callable<Integer> {
     }
 
     private static int runBatch(String batchPath, UrlAnalyzer urlAnalyzer, DomainAgeChecker domainAgeChecker,
-                                 RiskScorer scorer, ReportFormatter formatter, Reporter reporter,
+                                 RiskScorer scorer, MlScorer mlScorer, ReportFormatter formatter, Reporter reporter,
                                  HistoryWriter historyWriter, HistoryDatabase historyDb,
                                  HtmlReportWriter htmlReportWriter, boolean json, PrintStream out,
                                  ProgressListener progress) throws IOException {
@@ -384,6 +420,8 @@ public final class Main implements Callable<Integer> {
 
         int total = urls.size();
         List<AnalysisEntry> entries = new ArrayList<>();
+        // Parallel to entries; an element is null where ML is off or had nothing to score.
+        List<MlPrediction> mlPredictions = new ArrayList<>();
         for (int i = 0; i < total; i++) {
             String url = urls.get(i);
             UrlAnalysisResult result = urlAnalyzer.analyze(url);
@@ -393,6 +431,7 @@ public final class Main implements Callable<Integer> {
             historyWriter.record(url, HistoryWriter.TargetType.URL, score, domainAge);
             historyDb.recordUrl(url, result.components(), score, domainAge);
             entries.add(new AnalysisEntry(url, score, HistoryWriter.TargetType.URL, domainAge));
+            mlPredictions.add(mlScorer.predict(result, domainAge).orElse(null));
             progress.onProgress(i + 1, total);
         }
         if (total > 0) {
@@ -407,8 +446,8 @@ public final class Main implements Callable<Integer> {
             return 0;
         }
 
-        for (AnalysisEntry entry : entries) {
-            reporter.reportBatchEntry(entry);
+        for (int i = 0; i < entries.size(); i++) {
+            reporter.reportBatchEntry(entries.get(i), mlPredictions.get(i));
         }
         long high = entries.stream().filter(e -> e.score().level() == RiskLevel.HIGH).count();
         long medium = entries.stream().filter(e -> e.score().level() == RiskLevel.MEDIUM).count();
