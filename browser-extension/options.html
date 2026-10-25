@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>PhishNet Detector – Settings</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="options.css">
+  <script type="module" src="options.js"></script>
+</head>
+<body>
+  <main>
+    <div class="brand">
+      <img src="icons/icon-48.png" alt="">
+      <span>Phish<span class="accent">Net</span> Detector – Settings</span>
+    </div>
+
+    <form id="settings-form" novalidate>
+      <label for="api-url">PhishNet API address</label>
+      <input id="api-url" name="api-url" type="text" inputmode="url" spellcheck="false" autocomplete="off"
+             placeholder="http://localhost:8080" aria-describedby="api-url-help">
+      <p id="api-url-help" class="muted help">
+        Where your <code>phishnet serve</code> instance is listening. The default,
+        <code>http://localhost:8080</code>, matches <code>phishnet serve</code> and the Docker image run
+        with <code>-p 8080:8080</code>. For another port or machine, enter e.g.
+        <code>http://localhost:9090</code> or <code>http://192.168.1.20:8080</code>.
+      </p>
+      <div class="buttons">
+        <button type="submit" class="primary">Save</button>
+        <button type="button" id="test">Test connection</button>
+        <button type="button" id="reset">Reset to default</button>
+      </div>
+    </form>
+
+    <p id="status" class="notice" role="status" hidden></p>
+
+    <section class="about muted">
+      <h2>Privacy</h2>
+      <p>
+        Pages are only checked when you click the PhishNet toolbar icon. The extension then sends that
+        one page's address to the API address above - your own server - and nowhere else. Nothing runs
+        in the background.
+      </p>
+    </section>
+  </main>
+</body>
+</html>

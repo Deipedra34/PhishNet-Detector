@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <!-- Source for icon-16/32/48/128.png: the banner's envelope + hook, in the project's rose accent. -->
+  <rect width="128" height="128" rx="28" fill="#0b0e17"/>
+  <g fill="none" stroke="#fb7185" stroke-width="10" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="22" y="18" width="84" height="58" rx="9"/>
+    <path d="M22,26 L64,56 L106,26"/>
+    <path d="M64,76 L64,96 C64,116 92,116 92,98"/>
+    <path d="M92,98 L83,106"/>
+  </g>
+</svg>

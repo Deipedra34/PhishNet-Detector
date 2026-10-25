@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>PhishNet Detector</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="popup.css">
+  <script type="module" src="popup.js"></script>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <img src="icons/icon-48.png" alt="">
+      <span>Phish<span class="accent">Net</span></span>
+    </div>
+    <a href="#" id="open-settings" class="settings-link">Settings</a>
+  </header>
+
+  <p id="target" class="target muted"></p>
+
+  <main aria-live="polite">
+    <section id="loading" class="state" hidden>
+      <div class="spinner" aria-hidden="true"></div>
+      <p>Checking…</p>
+    </section>
+
+    <section id="result" class="state" hidden>
+      <div class="verdict">
+        <span id="level" class="level"></span>
+        <span class="score"><strong id="score"></strong><span class="muted"> / 100</span></span>
+      </div>
+      <div class="meter" aria-hidden="true"><div id="meter-fill" class="meter-fill"></div></div>
+      <p id="recommendation" class="recommendation"></p>
+      <p id="domain-age" class="muted small" hidden></p>
+      <h2 id="signals-heading">Why</h2>
+      <ul id="signals" class="signals"></ul>
+      <p id="no-signals" class="no-signals" hidden>✓ No phishing indicators detected</p>
+      <p id="more-signals" class="muted small" hidden></p>
+    </section>
+
+    <section id="error" class="state notice error" hidden>
+      <p id="error-message" class="error-message"></p>
+      <p id="error-hint" class="muted small"></p>
+      <button id="retry" type="button">Try again</button>
+    </section>
+
+    <section id="unsupported" class="state notice" hidden>
+      <p id="unsupported-message"></p>
+    </section>
+  </main>
+
+  <footer class="muted small">
+    API: <span id="api-url"></span>
+  </footer>
+</body>
+</html>

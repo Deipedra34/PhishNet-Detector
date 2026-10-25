@@ -17,6 +17,8 @@ keywords, and scoring weights - lives in a YAML config file, not in the code.
 It runs as a command-line tool by default, and can optionally run as a small
 JSON REST API server (`phishnet serve`) exposing the same URL and email
 scanning over HTTP - see [REST API (serve mode)](#rest-api-serve-mode).
+A companion [browser extension](#browser-extension) for Chrome, Edge and
+Firefox uses that API to check the page you're on with one click.
 
 An experimental machine-learning layer adds a second opinion next to that
 score: a small logistic regression model, trained on a bundled example
@@ -35,6 +37,7 @@ authoritative one - and `--no-ml` turns it off. See
 - [Scan History](#scan-history)
 - [Machine Learning Layer (experimental)](#machine-learning-layer-experimental)
 - [REST API (serve mode)](#rest-api-serve-mode)
+- [Browser extension](#browser-extension)
 - [Docker](#docker)
 - [Configuration](#configuration)
 - [Testing](#testing)
@@ -276,7 +279,7 @@ See the project README for the full option reference and sample output.
 
 ```
 $ java -jar target/phishnet.jar --version
-phishnet 2.3.0
+phishnet 2.4.0
 ```
 
 `--version` always reflects the version actually built (Maven filters it into
@@ -1062,6 +1065,28 @@ Notes:
 - There is no authentication, and the server listens on all network
   interfaces. Keep it on a trusted network, or put it behind a reverse proxy
   that handles TLS and access control before exposing it more widely.
+- Cross-origin (CORS) access is granted to **browser-extension pages only**
+  (`chrome-extension://...` and `moz-extension://...` origins), so the
+  [browser extension](#browser-extension) can call the API. Those requests get
+  an `Access-Control-Allow-Origin` header echoing their origin, and their
+  `OPTIONS` preflight is answered with `204`. Ordinary websites get no CORS
+  headers - a page open in your browser can't read results from a server on
+  your machine - and every other response is unchanged.
+
+## Browser extension
+
+[`browser-extension/`](browser-extension/) contains a small Manifest V3
+extension for Chrome, Edge, and Firefox. Click its toolbar icon and it sends
+the current tab's URL to your `phishnet serve` instance and shows the result:
+the LOW/MEDIUM/HIGH level (green/yellow/red), the score, and the top signals.
+It only checks a page when you click the icon - nothing runs in the
+background - and the API address (default `http://localhost:8080`, which also
+fits the Docker image run with `-p 8080:8080`) is set on its options page.
+
+It's standalone HTML/CSS/JavaScript, not part of the Maven build or the
+Docker image: load the folder unpacked into your browser. See
+[browser-extension/README.md](browser-extension/README.md) for setup,
+settings, permissions, and troubleshooting.
 
 ## Docker
 
@@ -1246,7 +1271,9 @@ hand-built cases and real-world-style fixtures under
 `src/test/resources/{urls,emails}`. The API tests (`ApiServerTest`) start a
 real server on a random free port and call it over HTTP with the JDK's
 `HttpClient`, covering successful URL/email scans, every 400/404/405/413/500
-error path, and the JSON error shape - still with no external network access.
+error path, the JSON error shape, and the extension-only CORS rules (headers and
+preflight for `chrome-extension://`/`moz-extension://` origins, none for
+websites) - still with no external network access.
 `HistoryDatabaseTest` covers the SQLite scan history (schema creation, inserts,
 listing, target/risk/type/date filters, LIKE-wildcard and SQL-injection-style
 search text, stats aggregation, write failures) against a fresh database file
@@ -1270,7 +1297,7 @@ or empty sections (brands, TLDs, weights).
 `mvn test` runs [JaCoCo](https://www.jacoco.org/jacoco/) automatically and
 generates an HTML report at `target/site/jacoco/index.html` - open that file
 in a browser for a line-by-line, package-by-package breakdown. The suite
-(449 tests as of this writing) maintains roughly **90% line / 80% branch**
+(455 tests as of this writing) maintains roughly **90% line / 80% branch**
 coverage overall; the biggest remaining gaps are `SslChecker`'s real-socket
 TLS handshake path and `SocketWhoisClient`'s port-43 I/O, which by design
 aren't exercised without a live network connection (the certificate-decision
@@ -1305,6 +1332,7 @@ src/test/java/...            (mirrors the layout above)
 src/test/resources/urls/     phishing_urls.txt, legitimate_urls.txt
 src/test/resources/emails/   .eml fixtures (phishing and legitimate)
 Dockerfile, .dockerignore    container image (see Docker)
+browser-extension/           Chrome/Edge/Firefox extension (see Browser extension)
 .github/workflows/           ci.yml, release.yml, docker-publish.yml
 ```
 

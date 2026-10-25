@@ -1,0 +1,52 @@
+main {
+  max-width: 620px;
+  margin: 40px auto;
+  padding: 0 16px;
+}
+
+form {
+  margin: 28px 0 16px;
+}
+
+label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+input {
+  width: 100%;
+  font: inherit;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.help {
+  font-size: 13px;
+  margin: 8px 0 14px;
+}
+
+.buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+#status {
+  margin: 0 0 24px;
+  overflow-wrap: anywhere;
+}
+
+.about h2 {
+  font-size: 14px;
+  color: var(--text);
+  margin: 24px 0 4px;
+}
+
+.about p {
+  font-size: 13px;
+  margin: 0;
+}

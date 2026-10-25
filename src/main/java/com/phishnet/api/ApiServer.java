@@ -19,7 +19,9 @@ import java.io.InputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
  * The optional REST API ({@code phishnet serve}): a thin HTTP layer over
@@ -35,6 +37,11 @@ import java.util.Map;
  * Every error - bad input, unknown route, oversized body, or an unexpected
  * failure - is answered with a JSON {@code {"error":"..."}} body; stack traces
  * go to the server's log stream only, never to the client.
+ *
+ * <p>Cross-origin (CORS) access is granted to browser-extension pages only - that's
+ * how the PhishNet browser extension's popup calls the API. Ordinary websites get
+ * no CORS headers, so a page you happen to visit can't read results from (or send
+ * JSON scans to) a server running on your machine.
  */
 public final class ApiServer {
 
@@ -48,6 +55,15 @@ public final class ApiServer {
 
     /** Multipart form field the .eml file must be uploaded under. */
     static final String EMAIL_UPLOAD_FIELD = "file";
+
+    /**
+     * Origins allowed cross-origin access: Chrome/Edge ({@code chrome-extension://<id>})
+     * and Firefox ({@code moz-extension://<uuid>}) extension pages.
+     */
+    private static final Pattern EXTENSION_ORIGIN = Pattern.compile("(chrome|moz)-extension://[A-Za-z0-9-]+");
+
+    /** How long a browser may cache a preflight answer, in seconds. */
+    static final String CORS_MAX_AGE_SECONDS = "600";
 
     private final ScanService scanner;
     private final PrintStream log;
@@ -102,16 +118,21 @@ public final class ApiServer {
         config.jetty.multipartConfig.maxTotalRequestSize(maxRequestBytes, SizeUnit.BYTES);
         config.jetty.multipartConfig.maxInMemoryFileSize((int) maxRequestBytes, SizeUnit.BYTES);
 
-        // Reject a declared-oversized body up front, before reading any of it.
         config.routes.before("/api/*", ctx -> {
+            // First, so every response to an extension - errors included - carries it.
+            allowExtensionOrigin(ctx);
+            // Reject a declared-oversized body up front, before reading any of it.
             if (ctx.req().getContentLengthLong() > maxRequestBytes) {
                 throw tooLarge();
             }
         });
-
         config.routes.get("/api/health", ctx -> respond(ctx, HttpStatus.OK, Map.of("status", "ok")));
         config.routes.post("/api/scan/url", this::scanUrl);
         config.routes.post("/api/scan/email", this::scanEmail);
+        // Per endpoint rather than "/api/*", so an unknown path still answers 404, not 405.
+        for (String path : List.of("/api/health", "/api/scan/url", "/api/scan/email")) {
+            config.routes.options(path, this::preflight);
+        }
 
         // Overrides Javalin's built-in handler, so its own 404/405/413 responses use our JSON error shape too.
         config.routes.exception(HttpResponseException.class, (e, ctx) -> {
@@ -150,6 +171,35 @@ public final class ApiServer {
         String raw = requiredText(readJsonObject(ctx), "raw");
         respond(ctx, HttpStatus.OK,
                 scanner.scanEmail("raw email", new ByteArrayInputStream(raw.getBytes(StandardCharsets.UTF_8))));
+    }
+
+    // --- CORS (browser extensions only) -------------------------------------------
+
+    static boolean isExtensionOrigin(String origin) {
+        return origin != null && EXTENSION_ORIGIN.matcher(origin).matches();
+    }
+
+    private static void allowExtensionOrigin(Context ctx) {
+        String origin = ctx.header("Origin");
+        if (isExtensionOrigin(origin)) {
+            ctx.header("Access-Control-Allow-Origin", origin);
+            ctx.header("Vary", "Origin");
+        }
+    }
+
+    /**
+     * Answers an extension's CORS preflight (sent before its JSON POST). For anyone
+     * else OPTIONS stays exactly what it was before CORS support: 405.
+     */
+    private void preflight(Context ctx) {
+        if (!isExtensionOrigin(ctx.header("Origin"))) {
+            throw new HttpResponseException(HttpStatus.METHOD_NOT_ALLOWED.getCode(),
+                    HttpStatus.METHOD_NOT_ALLOWED.getMessage());
+        }
+        ctx.header("Access-Control-Allow-Methods", "GET, POST");
+        ctx.header("Access-Control-Allow-Headers", "Content-Type");
+        ctx.header("Access-Control-Max-Age", CORS_MAX_AGE_SECONDS);
+        ctx.status(HttpStatus.NO_CONTENT);
     }
 
     // --- input parsing / validation --------------------------------------------

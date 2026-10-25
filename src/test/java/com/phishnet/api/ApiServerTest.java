@@ -30,6 +30,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -398,5 +399,120 @@ class ApiServerTest {
         assertEquals("suspicious.eml", entries.get(0).target());
         assertEquals(HistoryWriter.TargetType.URL, entries.get(1).type());
         assertEquals("http://192.168.1.1/login", entries.get(1).target());
+    }
+
+    // --- CORS (browser extensions only) -----------------------------------------
+
+    private static final String CHROME_EXTENSION = "chrome-extension://abcdefghijklmnopabcdefghijklmnop";
+    private static final String FIREFOX_EXTENSION = "moz-extension://4f3c2a10-8e7b-4d6a-9c1f-2b3e4d5f6a7b";
+
+    /** A raw exchange, without {@link #send}'s JSON assertions (a preflight answer has no body). */
+    private HttpResponse<String> exchange(String method, String path, String origin, String json)
+            throws IOException, InterruptedException {
+        HttpRequest.Builder builder = HttpRequest.newBuilder(uri(path))
+                .method(method, json == null
+                        ? HttpRequest.BodyPublishers.noBody()
+                        : HttpRequest.BodyPublishers.ofString(json));
+        if (json != null) {
+            builder.header("Content-Type", "application/json");
+        }
+        if (origin != null) {
+            builder.header("Origin", origin);
+        }
+        if (method.equals("OPTIONS")) {
+            builder.header("Access-Control-Request-Method", "POST");
+            builder.header("Access-Control-Request-Headers", "content-type");
+        }
+        return http.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+    }
+
+    private static String header(HttpResponse<?> response, String name) {
+        return response.headers().firstValue(name).orElse(null);
+    }
+
+    @Test
+    void extensionOriginsGetCorsHeadersOnScans() throws Exception {
+        startServer();
+
+        for (String origin : List.of(CHROME_EXTENSION, FIREFOX_EXTENSION)) {
+            HttpResponse<String> response = exchange("POST", "/api/scan/url", origin, "{\"url\":\"http://paypa1.com\"}");
+
+            assertEquals(200, response.statusCode());
+            assertEquals(origin, header(response, "Access-Control-Allow-Origin"));
+            assertEquals("Origin", header(response, "Vary"));
+            assertEquals("MEDIUM", MAPPER.readTree(response.body()).get("level").asText(), response.body());
+        }
+    }
+
+    @Test
+    void websitesAndPlainClientsGetNoCorsHeaders() throws Exception {
+        startServer();
+
+        for (String origin : Arrays.asList("https://evil.example", "http://localhost:3000", "null", null)) {
+            HttpResponse<String> response = exchange("POST", "/api/scan/url", origin, "{\"url\":\"http://paypa1.com\"}");
+
+            // The scan itself still works exactly as before - just with no cross-origin access granted.
+            assertEquals(200, response.statusCode(), String.valueOf(origin));
+            assertNull(header(response, "Access-Control-Allow-Origin"), String.valueOf(origin));
+        }
+    }
+
+    @Test
+    void extensionPreflightIsAnswered() throws Exception {
+        startServer();
+
+        for (String path : List.of("/api/scan/url", "/api/scan/email", "/api/health")) {
+            HttpResponse<String> response = exchange("OPTIONS", path, CHROME_EXTENSION, null);
+
+            assertEquals(204, response.statusCode(), path);
+            assertEquals(CHROME_EXTENSION, header(response, "Access-Control-Allow-Origin"));
+            assertTrue(header(response, "Access-Control-Allow-Methods").contains("POST"));
+            assertEquals("Content-Type", header(response, "Access-Control-Allow-Headers"));
+            assertEquals(ApiServer.CORS_MAX_AGE_SECONDS, header(response, "Access-Control-Max-Age"));
+        }
+    }
+
+    @Test
+    void optionsFromAnyoneElseIsUnchanged() throws Exception {
+        startServer();
+
+        for (String origin : Arrays.asList("https://evil.example", null)) {
+            HttpResponse<String> response = exchange("OPTIONS", "/api/scan/url", origin, null);
+
+            assertEquals(405, response.statusCode());
+            assertNull(header(response, "Access-Control-Allow-Origin"));
+            assertNull(header(response, "Access-Control-Allow-Methods"));
+            assertEquals("Method Not Allowed", MAPPER.readTree(response.body()).get("error").asText());
+        }
+        // An unknown path stays a 404, even for an extension.
+        assertEquals(404, exchange("OPTIONS", "/api/nope", CHROME_EXTENSION, null).statusCode());
+    }
+
+    @Test
+    void errorResponsesToAnExtensionAreReadableToo() throws Exception {
+        startServer();
+
+        HttpResponse<String> badJson = exchange("POST", "/api/scan/url", FIREFOX_EXTENSION, "{nope");
+        HttpResponse<String> unknown = exchange("GET", "/api/nope", FIREFOX_EXTENSION, null);
+
+        assertEquals(400, badJson.statusCode());
+        assertEquals(FIREFOX_EXTENSION, header(badJson, "Access-Control-Allow-Origin"));
+        assertEquals("Request body is not valid JSON", MAPPER.readTree(badJson.body()).get("error").asText());
+        assertEquals(404, unknown.statusCode());
+        assertEquals(FIREFOX_EXTENSION, header(unknown, "Access-Control-Allow-Origin"));
+    }
+
+    @Test
+    void onlyWellFormedExtensionOriginsQualify() {
+        assertTrue(ApiServer.isExtensionOrigin(CHROME_EXTENSION));
+        assertTrue(ApiServer.isExtensionOrigin(FIREFOX_EXTENSION));
+
+        assertFalse(ApiServer.isExtensionOrigin(null));
+        assertFalse(ApiServer.isExtensionOrigin("chrome-extension://"));
+        assertFalse(ApiServer.isExtensionOrigin("chrome-extension://abc/path"));
+        assertFalse(ApiServer.isExtensionOrigin("chrome-extension://abc.evil.example"));
+        assertFalse(ApiServer.isExtensionOrigin("https://chrome-extension.example"));
+        assertFalse(ApiServer.isExtensionOrigin("safari-web-extension://abc"));
+        assertFalse(ApiServer.isExtensionOrigin("null"));
     }
 }

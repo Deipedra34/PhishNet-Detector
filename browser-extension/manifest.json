@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "PhishNet Detector",
+  "version": "2.4.0",
+  "description": "Checks the page you're on with your own PhishNet Detector API (phishnet serve) and shows its phishing risk score.",
+  "homepage_url": "https://github.com/Deipedra34/PhishNet-Detector",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "action": {
+    "default_title": "Check this page with PhishNet",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "permissions": ["activeTab", "storage"],
+  "host_permissions": ["http://localhost/*", "http://127.0.0.1/*"],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "phishnet-detector@deipedra34.github.io",
+      "strict_min_version": "128.0"
+    }
+  }
+}

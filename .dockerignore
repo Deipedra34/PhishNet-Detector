@@ -40,6 +40,9 @@ README.md
 LICENSE
 assets/
 
+# Browser extension (standalone source, loaded into the browser by hand)
+browser-extension/
+
 # Docker files themselves
 Dockerfile
 .dockerignore
