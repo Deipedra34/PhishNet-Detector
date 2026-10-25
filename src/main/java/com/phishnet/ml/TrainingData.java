@@ -1,10 +1,10 @@
 package com.phishnet.ml;
 
-import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
+import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -67,18 +67,21 @@ public record TrainingData(String source, List<Example> examples) {
      *                                  or if it doesn't contain both phishing and legitimate rows
      */
     public static TrainingData parse(Reader reader, String source) throws IOException {
-        BufferedReader lines = reader instanceof BufferedReader b ? b : new BufferedReader(reader);
+        // Read it all up front (training files are small) rather than wrapping the
+        // caller's reader in a BufferedReader that this method would never close.
+        StringWriter text = new StringWriter();
+        reader.transferTo(text);
+        List<String> lines = text.toString().lines().toList();
+
         int[] featureColumns = null;
         int labelColumn = -1;
         int columnCount = 0;
         List<Example> examples = new ArrayList<>();
 
-        String line;
-        int lineNumber = 0;
-        while ((line = lines.readLine()) != null) {
-            lineNumber++;
-            String trimmed = line.strip();
-            if (lineNumber == 1 && trimmed.startsWith("﻿")) {
+        for (int index = 0; index < lines.size(); index++) {
+            int lineNumber = index + 1;
+            String trimmed = lines.get(index).strip();
+            if (lineNumber == 1 && trimmed.startsWith("\uFEFF")) {
                 trimmed = trimmed.substring(1).strip(); // UTF-8 byte order mark from some spreadsheet exports
             }
             if (trimmed.isEmpty() || trimmed.startsWith("#")) {

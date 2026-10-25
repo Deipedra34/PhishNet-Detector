@@ -85,7 +85,7 @@ class TrainingDataTest {
     @Test
     void loadsFromFile(@TempDir Path tempDir) throws IOException {
         Path file = tempDir.resolve("data.csv");
-        Files.writeString(file, "﻿" + HEADER + "\n39,1,1,0,0,1,1,0,0,0,26,0,1\n29,0,2,1,0,10,0,0,0,0,9000,1,0\n",
+        Files.writeString(file, "\uFEFF" + HEADER + "\n39,1,1,0,0,1,1,0,0,0,26,0,1\n29,0,2,1,0,10,0,0,0,0,9000,1,0\n",
                 StandardCharsets.UTF_8);
 
         TrainingData data = TrainingData.load(file);
