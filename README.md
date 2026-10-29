@@ -18,7 +18,9 @@ It runs as a command-line tool by default, and can optionally run as a small
 JSON REST API server (`phishnet serve`) exposing the same URL and email
 scanning over HTTP - see [REST API (serve mode)](#rest-api-serve-mode).
 A companion [browser extension](#browser-extension) for Chrome, Edge and
-Firefox uses that API to check the page you're on with one click.
+Firefox uses that API to check the page you're on with one click, and
+`phishnet monitor` watches a mailbox over IMAP and scans new mail as it
+arrives - see [Real-Time Email Monitoring](#real-time-email-monitoring).
 
 An experimental machine-learning layer adds a second opinion next to that
 score: a small logistic regression model, trained on a bundled example
@@ -38,6 +40,7 @@ authoritative one - and `--no-ml` turns it off. See
 - [Machine Learning Layer (experimental)](#machine-learning-layer-experimental)
 - [REST API (serve mode)](#rest-api-serve-mode)
 - [Browser extension](#browser-extension)
+- [Real-Time Email Monitoring](#real-time-email-monitoring)
 - [Docker](#docker)
 - [Configuration](#configuration)
 - [Testing](#testing)
@@ -273,13 +276,14 @@ Examples:
   phishnet serve --port 8080   (REST API mode; see: phishnet serve --help)
   phishnet history list        (past scans; see: phishnet history --help)
   phishnet model info          (ML model details; see: phishnet model --help)
+  phishnet monitor --help      (watch a mailbox for phishing as mail arrives)
 
 See the project README for the full option reference and sample output.
 ```
 
 ```
 $ java -jar target/phishnet.jar --version
-phishnet 2.4.0
+phishnet 2.5.0
 ```
 
 `--version` always reflects the version actually built (Maven filters it into
@@ -345,6 +349,9 @@ java -jar target/phishnet.jar --url "https://example.com" --no-ml
 # Retrain the ML model, or show what the current one was trained on
 java -jar target/phishnet.jar model train
 java -jar target/phishnet.jar model info
+
+# Watch a mailbox and scan new mail as it arrives (see Real-Time Email Monitoring)
+java -jar target/phishnet.jar monitor --host imap.gmail.com --username you@gmail.com --ssl
 ```
 
 Output is colored automatically when stdout is a real terminal (HIGH=red, MEDIUM=yellow, LOW=green,
@@ -1088,6 +1095,175 @@ Docker image: load the folder unpacked into your browser. See
 [browser-extension/README.md](browser-extension/README.md) for setup,
 settings, permissions, and troubleshooting.
 
+## Real-Time Email Monitoring
+
+`phishnet monitor` connects to a mailbox over IMAP (or POP3) and scans each new
+email as it arrives - with the same `EmailAnalyzer` and scoring engine as
+`phishnet --email`, so a monitored message gets exactly the result its `.eml`
+file would. It's read-only unless you opt in to flagging or moving suspicious
+mail.
+
+```bash
+# Prompts for the password (input hidden), then watches INBOX until Ctrl+C
+java -jar target/phishnet.jar monitor --host imap.gmail.com --username you@gmail.com --ssl
+
+# Headless/scripted: the password comes from the environment instead of a prompt
+export PHISHNET_MAIL_PASSWORD='abcd efgh ijkl mnop'   # e.g. a Gmail app password
+java -jar target/phishnet.jar monitor --host imap.gmail.com --username you@gmail.com --ssl
+
+# Opt in to changing the mailbox: flag suspicious mail and move it to a "Suspicious" folder
+java -jar target/phishnet.jar monitor --host imap.gmail.com --username you@gmail.com --ssl \
+  --flag-suspicious --move-to-folder Suspicious
+```
+
+```
+$ java -jar target/phishnet.jar monitor --host imap.gmail.com --username you@gmail.com --ssl
+Password for you@gmail.com on imap.gmail.com:993 (input hidden):
+PhishNet is monitoring INBOX on imap.gmail.com:993 (IMAP over TLS) as you@gmail.com
+Read-only: the mailbox is never changed. Suspicious mail (MEDIUM and HIGH risk) is reported.
+Recording suspicious mail to phishnet-history.csv and /home/you/.phishnet/phishnet-history.db.
+Only mail arriving from now on is scanned. Press Ctrl+C to stop.
+[09:14:02] Connected. Waiting for new mail (IMAP IDLE - near real time).
+[09:15:40] LOW 0/100  From: Alice <alice@example.com>  Subject: Lunch on Friday?
+[09:21:07] ✗ HIGH 85/100  From: PayPal <alert@random-mailer.info>  Subject: Verify immediately
+  ✗ [urgencyLanguage] Message uses urgency/threat language typical of phishing
+  ✗ [senderMismatch] Display name references brand 'paypal' but sender address domain does not match
+  ✗ [riskyEmbeddedLink] Embedded link triggered its own risk signals
+  ✗ [ipAddressHost] URL uses a raw IP address instead of a domain name
+  High risk of phishing. Do not click any links, enter credentials, or open attachments. Report and delete.
+  Actions: recorded in scan history
+^C[09:30:12] Monitoring stopped. Scanned 2 message(s), 1 suspicious.
+```
+
+### How it works
+
+- **New mail only.** On startup PhishNet notes where the mailbox currently ends
+  and scans only messages that arrive after that. If the connection drops, it
+  picks up where it left off after reconnecting, so mail that arrived in the
+  meantime is still scanned, and nothing is scanned twice.
+- **IMAP IDLE when available.** If the server supports IDLE (Gmail, Outlook,
+  iCloud, Fastmail, Dovecot, ... do), new mail is reported within seconds. The
+  IDLE is renewed every 5 minutes so neither the server nor a router drops the
+  quiet connection. Without IDLE, PhishNet checks every `--poll-interval`
+  seconds (default 60, minimum 5).
+- **POP3** (`--protocol pop3`) is supported too, but only as read-only polling
+  of INBOX: POP3 has no IDLE, no flags, and no folders, so `--flag-suspicious`,
+  `--move-to-folder`, and `--folder` need IMAP. New messages are told apart by
+  their UIDL ids, and nothing is ever deleted from the server.
+- **Reconnects with backoff.** A dropped connection, timeout, or server error
+  never ends the monitor: it waits 2 s, 4 s, 8 s, ... up to 5 minutes between
+  attempts, and starts again at 2 s once connected. A **rejected login** is
+  the exception - it stops the monitor with exit code 1 instead of retrying,
+  since repeated failed logins can get an account locked. So does a `--folder`
+  that doesn't exist.
+- **What counts as suspicious** is set by `--act-on`: `MEDIUM` (the default)
+  or `HIGH`. Suspicious messages are reported with their signals and the
+  recommendation, and recorded in the [scan history](#scan-history) - the CSV
+  and the SQLite database, under a label like
+  `imap://imap.gmail.com/INBOX;UID=4711` plus sender and subject. Add
+  `--record-all` to record every scanned message. They show up in
+  `phishnet history` like any other email scan.
+- Messages larger than 10 MB are analyzed from their first 10 MB, which still
+  covers the headers and text, usually leaving out only attachments.
+- A message PhishNet can't read is retried twice more, then skipped with a
+  warning, so one broken message can't stall monitoring.
+
+### Changing the mailbox (opt-in)
+
+By default the monitor never changes anything: the folder is opened
+read-only, and messages are read without setting the `\Seen` flag, so your
+unread mail stays unread. Two options change that, for suspicious messages only:
+
+| Option | What it does |
+| --- | --- |
+| `--flag-suspicious` | Sets the `\Flagged` flag (a star/flag in most mail apps) and, if the server allows custom keywords, the `$Phishing` keyword |
+| `--move-to-folder <name>` | Moves the message to that folder, creating the folder at startup if needed |
+
+Moving uses the IMAP `MOVE` command. On a server without it, PhishNet copies
+the message and deletes only that original with `UID EXPUNGE`; if the server
+supports neither, it copies the message, leaves the original in place, and
+says so. It never runs a plain `EXPUNGE`, which would also permanently remove
+any other messages you had marked as deleted.
+
+### Options
+
+| Option | Meaning |
+| --- | --- |
+| `--host <host>` | Mail server (required) |
+| `--username <user>` | Login name, usually the email address; or set `PHISHNET_MAIL_USERNAME` |
+| `--password` | Prompt for the password with input hidden (see Security notes for the other ways) |
+| `--ssl` / `--starttls` / `--allow-plaintext` | Encryption - one is required. `--ssl` is TLS from the start, `--starttls` upgrades a plain connection and refuses to continue if that fails, `--allow-plaintext` is only for a local test server |
+| `--port <port>` | Default 993 for IMAP with `--ssl`, 143 without; 995 / 110 for POP3 |
+| `--protocol <protocol>` | `imap` (default) or `pop3` |
+| `--folder <name>` | IMAP folder to watch (default INBOX) |
+| `--oauth2` | Log in with OAuth2 (SASL XOAUTH2); the "password" is an access token |
+| `--poll-interval <seconds>` | Polling period when IDLE isn't available (default 60) |
+| `--act-on <level>` | Lowest risk level treated as suspicious: `MEDIUM` (default) or `HIGH` |
+| `--flag-suspicious`, `--move-to-folder <name>` | Opt-in mailbox changes, above |
+| `--record-all` | Record every message in the history, not only suspicious ones |
+| `--history-file`, `--no-history`, `--history-db`, `--no-history-db` | Same as for scans |
+| `--config <path>` | Custom YAML config, same as for scans |
+| `-v` / `-q`, `--no-color` | Verbose (every message's signals, connection attempts) or quiet (one `LEVEL SCORE LABEL` line per message only); same conventions as scans |
+
+Exit codes: `0` after Ctrl+C (or SIGTERM), `1` for a rejected login, a missing
+folder, or an unreadable config, `2` for invalid options.
+
+### Common providers
+
+| Provider | Command | Credentials |
+| --- | --- | --- |
+| Gmail | `--host imap.gmail.com --ssl` | An [app password](https://support.google.com/accounts/answer/185833) (needs 2-Step Verification), or `--oauth2` |
+| Outlook.com / Hotmail, Microsoft 365 | `--host outlook.office365.com --ssl` | `--oauth2` with an access token - Microsoft no longer accepts passwords for IMAP |
+| iCloud Mail | `--host imap.mail.me.com --ssl` | An [app-specific password](https://support.apple.com/en-us/102654) |
+| Yahoo Mail | `--host imap.mail.yahoo.com --ssl` | An app password from Yahoo's account security settings |
+| Fastmail | `--host imap.fastmail.com --ssl` | An app password |
+| Your own server (Dovecot, ...) | `--host mail.example.com --ssl` (or `--starttls`) | Your mailbox password, or whatever your admin set up |
+
+Gmail and Outlook.com **don't accept your regular account password** for
+IMAP. Create an app password (or use OAuth2) - it only grants mail access, and
+you can revoke it at any time without changing your real password.
+
+`--oauth2` sends the "password" as an OAuth2 access token. PhishNet doesn't
+run the OAuth sign-in flow or refresh tokens for you: get a token with your
+provider's tooling and pass it like a password. Access tokens typically expire
+after about an hour, and the monitor then stops with a login error, so for a
+long-running monitor an app password is the practical choice where the
+provider still offers one.
+
+### Security notes
+
+- **The password is never logged or stored.** It isn't accepted as a plain
+  command-line argument (`--password=secret` or `--password secret` is rejected
+  without repeating the value, since it would end up in your shell history and
+  process list). It comes from the hidden prompt or the
+  `PHISHNET_MAIL_PASSWORD` environment variable, is only ever sent to the mail
+  server, and appears in no output, error message, or history file - the
+  history records the mailbox label, sender, subject, and score only.
+- An environment variable is readable by other processes running as the same
+  user (and by anyone who can inspect the process). On a shared machine,
+  prefer the prompt, or a dedicated account with an app password you can revoke.
+- **Use app-specific passwords or OAuth2** wherever your provider supports
+  them, never your main account password. Only use plain username/password
+  IMAP login with a provider and server you trust.
+- **Encryption is required by default**: TLS (`--ssl`) or enforced STARTTLS,
+  with the server's certificate and host name verified. `--allow-plaintext`
+  sends the password readably over the network and is meant only for a mail
+  server on your own machine.
+- **Read-only by default**, as described above. `--flag-suspicious` and
+  `--move-to-folder` are the only options that change the mailbox.
+- Subjects and sender names come from whoever sent the mail, so control
+  characters (e.g. terminal escape sequences) are stripped before printing.
+
+In Docker, pass the password through the environment without putting it on
+the command line - `-e PHISHNET_MAIL_PASSWORD` with no `=value` copies it from
+your shell:
+
+```bash
+export PHISHNET_MAIL_PASSWORD='abcd efgh ijkl mnop'
+docker run --rm -e PHISHNET_MAIL_PASSWORD -v phishnet-history:/home/phishnet/.phishnet \
+  ghcr.io/deipedra34/phishnet-detector monitor --host imap.gmail.com --username you@gmail.com --ssl
+```
+
 ## Docker
 
 A prebuilt multi-arch image (`linux/amd64`, `linux/arm64`) is published to
@@ -1287,6 +1463,17 @@ confirm that a missing model is trained on first use while a corrupt one only
 warns; `ModelCommandTest` drives `phishnet model` end to end, and `MainTest`
 checks that `--no-ml` never touches the model file. Every one of them uses a model
 file in a JUnit temp directory, never `~/.phishnet`.
+The mail monitor's tests run without a mail server: `MailMonitorServiceTest`
+drives the monitor loop against an in-memory fake mailbox (`FakeMailSource`)
+that scripts new mail, failed connects, dropped connections, unreadable and
+deleted messages, and rejected logins, checking the scans, the opt-in
+flag/move actions, the reconnect backoff, and shutdown;
+`MonitorBuildingBlocksTest` checks that a fetched message is analyzed exactly
+like the same `.eml` file, the action policy, the backoff, and that connection
+settings never contain the password; `MonitorCommandTest` drives
+`phishnet monitor` end to end, including password handling and history output.
+The IMAP and POP3 connection classes themselves need a real server and aren't
+exercised by the suite.
 Edge-case coverage includes empty/null/blank/whitespace-only and
 special-character-only input, multi-thousand-character URLs, malformed URLs
 (missing scheme, invalid characters, multiple `://`, trailing garbage),
@@ -1297,7 +1484,7 @@ or empty sections (brands, TLDs, weights).
 `mvn test` runs [JaCoCo](https://www.jacoco.org/jacoco/) automatically and
 generates an HTML report at `target/site/jacoco/index.html` - open that file
 in a browser for a line-by-line, package-by-package breakdown. The suite
-(455 tests as of this writing) maintains roughly **90% line / 80% branch**
+(510 tests as of this writing) maintains roughly **90% line / 80% branch**
 coverage overall; the biggest remaining gaps are `SslChecker`'s real-socket
 TLS handshake path and `SocketWhoisClient`'s port-43 I/O, which by design
 aren't exercised without a live network connection (the certificate-decision
@@ -1319,9 +1506,10 @@ src/main/java/com/phishnet/
   analyzer/   UrlAnalyzer, SslChecker, EmailAnalyzer, DomainAgeChecker, WhoisClient, SocketWhoisClient
   model/      Signal, RiskScore, UrlComponents, PhishNetConfig, ...
   scoring/    RiskScorer
-  cli/        Main (picocli @Command), ServeCommand, HistoryCommand, ModelCommand, ReportFormatter, Reporter, HistoryReporter, OutputLevel, HistoryWriter, HtmlReportWriter
+  cli/        Main (picocli @Command), ServeCommand, HistoryCommand, ModelCommand, MonitorCommand, ReportFormatter, Reporter, HistoryReporter, MonitorReporter, OutputLevel, HistoryWriter, HtmlReportWriter
   history/    HistoryDatabase (SQLite scan history), HistoryEntry, HistoryFilter, HistoryStats
   ml/         FeatureVector, FeatureExtractor, LogisticRegression, TrainingData, MlModel, MlScorer, MlPrediction (experimental ML layer)
+  mail/       MailMonitorService, MailSource, ImapMailSource, Pop3MailSource, MessageConverter, MonitorActions, Backoff, MailServerSettings (mailbox monitoring)
   api/        ApiServer (Javalin routes, validation, JSON errors), ScanService (analyzer/scorer wrapper)
   util/       LevenshteinDistance, HomoglyphUtil, ConfigLoader, AnsiColor, ColorSupport
 src/main/resources/phishnet-config.yaml

@@ -61,6 +61,7 @@ import java.util.concurrent.Callable;
                 "  phishnet serve --port 8080   (REST API mode; see: phishnet serve --help)",
                 "  phishnet history list        (past scans; see: phishnet history --help)",
                 "  phishnet model info          (ML model details; see: phishnet model --help)",
+                "  phishnet monitor --help      (watch a mailbox for phishing as mail arrives)",
                 "",
                 "See the project README for the full option reference and sample output."
         }
@@ -246,6 +247,16 @@ public final class Main implements Callable<Integer> {
         if (args.length > 0 && args[0].equals(MODEL_COMMAND)) {
             return execute(ModelCommand.commandLine(out, err), Arrays.copyOfRange(args, 1, args.length), out, err);
         }
+        // ...and for "monitor", which watches a mailbox instead of scanning given input.
+        if (args.length > 0 && args[0].equals(MONITOR_COMMAND)) {
+            String[] monitorArgs = Arrays.copyOfRange(args, 1, args.length);
+            String passwordError = MonitorCommand.passwordValueError(monitorArgs);
+            if (passwordError != null) {
+                err.println("Error: " + passwordError);
+                return 2;
+            }
+            return execute(monitorCommandLine(new MonitorCommand(out, err)), monitorArgs, out, err);
+        }
 
         Main app = new Main();
         app.out = out;
@@ -262,6 +273,14 @@ public final class Main implements Callable<Integer> {
 
     /** First argument that switches from a one-off scan to training/inspecting the ML model. */
     static final String MODEL_COMMAND = "model";
+
+    /** First argument that switches from a one-off scan to watching a mailbox for new mail. */
+    static final String MONITOR_COMMAND = "monitor";
+
+    /** The {@code monitor} command, accepting "--protocol pop3" / "--act-on high" in any case. */
+    static CommandLine monitorCommandLine(MonitorCommand command) {
+        return new CommandLine(command).setCaseInsensitiveEnumValuesAllowed(true);
+    }
 
     /** Applies the shared stream/color/error-handling setup, then parses and runs {@code cmd}. */
     private static int execute(CommandLine cmd, String[] args, PrintStream out, PrintStream err) {
