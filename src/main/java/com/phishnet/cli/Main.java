@@ -5,6 +5,8 @@ import com.phishnet.analyzer.EmailAnalyzer;
 import com.phishnet.analyzer.SocketWhoisClient;
 import com.phishnet.analyzer.UrlAnalyzer;
 import com.phishnet.analyzer.WhoisClient;
+import com.phishnet.batch.ParallelScanner;
+import com.phishnet.batch.UrlScanner;
 import com.phishnet.history.HistoryDatabase;
 import com.phishnet.ml.MlPrediction;
 import com.phishnet.ml.MlScorer;
@@ -21,8 +23,10 @@ import picocli.CommandLine;
 import picocli.CommandLine.ArgGroup;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.IVersionProvider;
+import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.ParameterException;
+import picocli.CommandLine.Spec;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -62,6 +66,7 @@ import java.util.concurrent.Callable;
                 "  phishnet history list        (past scans; see: phishnet history --help)",
                 "  phishnet model info          (ML model details; see: phishnet model --help)",
                 "  phishnet monitor --help      (watch a mailbox for phishing as mail arrives)",
+                "  phishnet queue --help        (distributed scanning with Redis workers)",
                 "",
                 "See the project README for the full option reference and sample output."
         }
@@ -187,6 +192,18 @@ public final class Main implements Callable<Integer> {
         private boolean noWhois;
     }
 
+    // --- batch options ---------------------------------------------------------
+
+    @ArgGroup(exclusive = false, multiplicity = "0..1", heading = "%nBatch options:%n")
+    private BatchOptions batch = new BatchOptions();
+
+    private static final class BatchOptions {
+        @Option(names = "--threads", paramLabel = "<n>",
+                description = "Scan --batch URLs on this many threads in parallel (default: one per CPU core; "
+                        + "1 scans them one at a time). Output order is the same either way.")
+        private Integer threads;
+    }
+
     // --- machine learning options ---------------------------------------------
 
     @ArgGroup(exclusive = false, multiplicity = "0..1", heading = "%nMachine learning options (experimental):%n")
@@ -205,6 +222,9 @@ public final class Main implements Callable<Integer> {
     }
 
     // -h/--help and -V/--version are handled automatically via mixinStandardHelpOptions.
+
+    @Spec
+    private CommandSpec spec;
 
     private PrintStream out;
     private PrintStream err;
@@ -247,6 +267,11 @@ public final class Main implements Callable<Integer> {
         if (args.length > 0 && args[0].equals(MODEL_COMMAND)) {
             return execute(ModelCommand.commandLine(out, err), Arrays.copyOfRange(args, 1, args.length), out, err);
         }
+        // ...and for "queue", the optional Redis-based distributed mode.
+        if (args.length > 0 && args[0].equals(QUEUE_COMMAND)) {
+            return execute(QueueCommand.commandLine(out, err, whoisClient),
+                    Arrays.copyOfRange(args, 1, args.length), out, err);
+        }
         // ...and for "monitor", which watches a mailbox instead of scanning given input.
         if (args.length > 0 && args[0].equals(MONITOR_COMMAND)) {
             String[] monitorArgs = Arrays.copyOfRange(args, 1, args.length);
@@ -273,6 +298,9 @@ public final class Main implements Callable<Integer> {
 
     /** First argument that switches from a one-off scan to training/inspecting the ML model. */
     static final String MODEL_COMMAND = "model";
+
+    /** First argument that switches to the Redis-based distributed scanning commands. */
+    static final String QUEUE_COMMAND = "queue";
 
     /** First argument that switches from a one-off scan to watching a mailbox for new mail. */
     static final String MONITOR_COMMAND = "monitor";
@@ -310,6 +338,12 @@ public final class Main implements Callable<Integer> {
 
     @Override
     public Integer call() {
+        if (batch.threads != null && (batch.threads < 1 || batch.threads > ParallelScanner.MAX_THREADS)) {
+            throw new ParameterException(spec.commandLine(), "Invalid value for option '--threads': "
+                    + batch.threads + " (must be 1-" + ParallelScanner.MAX_THREADS + ")");
+        }
+        int threads = batch.threads != null ? batch.threads : ParallelScanner.defaultThreads();
+
         PhishNetConfig config;
         try {
             config = configPath != null
@@ -363,7 +397,7 @@ public final class Main implements Callable<Integer> {
                 ProgressListener progress = ProgressReporter.forBatch(
                         level, output.json, ColorSupport.isTty(), out, err, colorEnabled);
                 return runBatch(mode.batchPath, urlAnalyzer, domainAgeChecker, scorer, mlScorer, formatter, reporter,
-                        historyWriter, historyDb, htmlReportWriter, output.json, out, progress);
+                        historyWriter, historyDb, htmlReportWriter, output.json, out, progress, threads);
             }
         } catch (IOException e) {
             err.println("Error: " + e.getMessage());
@@ -427,7 +461,7 @@ public final class Main implements Callable<Integer> {
                                  RiskScorer scorer, MlScorer mlScorer, ReportFormatter formatter, Reporter reporter,
                                  HistoryWriter historyWriter, HistoryDatabase historyDb,
                                  HtmlReportWriter htmlReportWriter, boolean json, PrintStream out,
-                                 ProgressListener progress) throws IOException {
+                                 ProgressListener progress, int threads) throws IOException {
         List<String> lines = Files.readAllLines(Path.of(batchPath));
         List<String> urls = new ArrayList<>();
         for (String line : lines) {
@@ -441,17 +475,31 @@ public final class Main implements Callable<Integer> {
         List<AnalysisEntry> entries = new ArrayList<>();
         // Parallel to entries; an element is null where ML is off or had nothing to score.
         List<MlPrediction> mlPredictions = new ArrayList<>();
-        for (int i = 0; i < total; i++) {
-            String url = urls.get(i);
-            UrlAnalysisResult result = urlAnalyzer.analyze(url);
-            DomainAgeResult domainAge = domainAgeFor(result, domainAgeChecker);
-            RiskScore score = scorer.score(result.signals(), domainAge);
-            // Written per item, inside the scan loop, so an interrupted batch still leaves partial history.
-            historyWriter.record(url, HistoryWriter.TargetType.URL, score, domainAge);
-            historyDb.recordUrl(url, result.components(), score, domainAge);
-            entries.add(new AnalysisEntry(url, score, HistoryWriter.TargetType.URL, domainAge));
-            mlPredictions.add(mlScorer.predict(result, domainAge).orElse(null));
-            progress.onProgress(i + 1, total);
+        // The scanning itself (parsing, WHOIS, scoring, ML) runs on worker threads. Everything
+        // with side effects runs here on this thread: progress as each URL finishes, and history
+        // and the report entries in input order - the same order a one-at-a-time scan produced.
+        // One DomainAgeChecker for the whole batch: it's thread-safe, and its cache means a
+        // domain that appears many times is looked up once.
+        UrlScanner urlScanner = new UrlScanner(urlAnalyzer, result -> domainAgeFor(result, domainAgeChecker), scorer);
+        try {
+            new ParallelScanner(threads).run(urls,
+                    url -> {
+                        UrlScanner.Result scan = urlScanner.scan(url);
+                        return new BatchItem(scan, mlScorer.predict(scan.analysis(), scan.domainAge()).orElse(null));
+                    },
+                    (index, item) -> {
+                        // Written per item as results come in, so an interrupted batch still leaves partial history.
+                        UrlScanner.Result scan = item.scan();
+                        historyWriter.record(scan.url(), HistoryWriter.TargetType.URL, scan.score(), scan.domainAge());
+                        historyDb.recordUrl(scan.url(), scan.analysis().components(), scan.score(), scan.domainAge());
+                        entries.add(new AnalysisEntry(scan.url(), scan.score(), HistoryWriter.TargetType.URL,
+                                scan.domainAge()));
+                        mlPredictions.add(item.ml());
+                    },
+                    progress::onProgress);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("batch scan interrupted", e);
         }
         if (total > 0) {
             progress.onComplete();
@@ -473,6 +521,10 @@ public final class Main implements Callable<Integer> {
         reporter.reportBatchSummary(entries.size(), high, medium);
 
         return (reporter.level() == OutputLevel.QUIET && high > 0) ? 1 : 0;
+    }
+
+    /** One scanned --batch URL plus its ML prediction (null when ML is off or had nothing to score). */
+    private record BatchItem(UrlScanner.Result scan, MlPrediction ml) {
     }
 
     /** Non-quiet modes always exit 0; quiet mode exits 1 for HIGH risk so it's usable in scripts. */

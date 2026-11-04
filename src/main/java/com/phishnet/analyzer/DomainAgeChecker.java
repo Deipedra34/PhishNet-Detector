@@ -11,13 +11,13 @@ import java.time.Clock;
 import java.time.DateTimeException;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -37,6 +37,10 @@ import java.util.regex.Pattern;
  * Within one run, results are cached per domain and IANA referrals per TLD,
  * and a server that failed once is not retried - so a batch full of URLs on
  * an unreachable registry costs one timeout, not one per URL.
+ *
+ * Thread-safe, for parallel batch scans: concurrent checks of the same domain
+ * share a single lookup (the later callers wait for the first one's result),
+ * while different domains are looked up in parallel.
  *
  * The parsing (parseCreationDate, parseReferral) is static and network-free,
  * so it's tested directly against canned WHOIS responses.
@@ -117,9 +121,11 @@ public final class DomainAgeChecker {
     private final int timeoutMillis;
     private final Clock clock;
 
-    private final Map<String, DomainAgeResult> resultCache = new HashMap<>();
-    private final Map<String, Optional<String>> registryServerCache = new HashMap<>();
-    private final Set<String> failedServers = new HashSet<>();
+    /** Per domain: the finished result, or the lookup another thread is still running. */
+    private final Map<String, CompletableFuture<DomainAgeResult>> resultCache = new ConcurrentHashMap<>();
+    // Two threads may occasionally both ask IANA about the same new TLD; harmless, and rare.
+    private final Map<String, Optional<String>> registryServerCache = new ConcurrentHashMap<>();
+    private final Set<String> failedServers = ConcurrentHashMap.newKeySet();
 
     public DomainAgeChecker() {
         this(new SocketWhoisClient(), DEFAULT_TIMEOUT_MILLIS, Clock.systemDefaultZone());
@@ -159,12 +165,20 @@ public final class DomainAgeChecker {
             // Also keeps CR/LF or other junk from ever reaching a WHOIS server as part of the query.
             return DomainAgeResult.unknown(domainName, "not a valid domain name for WHOIS");
         }
-        DomainAgeResult cached = resultCache.get(domain);
-        if (cached == null) {
-            cached = lookup(domain);
-            resultCache.put(domain, cached);
+        CompletableFuture<DomainAgeResult> mine = new CompletableFuture<>();
+        CompletableFuture<DomainAgeResult> existing = resultCache.putIfAbsent(domain, mine);
+        if (existing != null) {
+            return existing.join();
         }
-        return cached;
+        try {
+            DomainAgeResult result = lookup(domain);
+            mine.complete(result);
+            return result;
+        } catch (RuntimeException | Error e) {
+            // lookup() catches RuntimeException itself; this only keeps waiting threads from hanging.
+            mine.completeExceptionally(e);
+            throw e;
+        }
     }
 
     private DomainAgeResult lookup(String domain) {

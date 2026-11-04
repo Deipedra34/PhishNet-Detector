@@ -21,6 +21,9 @@ A companion [browser extension](#browser-extension) for Chrome, Edge and
 Firefox uses that API to check the page you're on with one click, and
 `phishnet monitor` watches a mailbox over IMAP and scans new mail as it
 arrives - see [Real-Time Email Monitoring](#real-time-email-monitoring).
+Batch scans run on several threads at once, and `phishnet queue` can spread a
+large list over many worker machines through Redis - see
+[Parallel & Distributed Scanning](#parallel--distributed-scanning).
 
 An experimental machine-learning layer adds a second opinion next to that
 score: a small logistic regression model, trained on a bundled example
@@ -41,6 +44,7 @@ authoritative one - and `--no-ml` turns it off. See
 - [REST API (serve mode)](#rest-api-serve-mode)
 - [Browser extension](#browser-extension)
 - [Real-Time Email Monitoring](#real-time-email-monitoring)
+- [Parallel & Distributed Scanning](#parallel--distributed-scanning)
 - [Docker](#docker)
 - [Configuration](#configuration)
 - [Testing](#testing)
@@ -209,8 +213,8 @@ Usage:
 phishnet [-hV] [--config=<path>] (--url=<url> | --email=<file.eml> |
          --batch=<file>) [[--json] [--no-color]] [-v | -q]
          [[--history-file=<path>] [--no-history] [--history-db=<path>]
-         [--no-history-db]] [[--html-report=<path>]] [[--no-whois]] [[--no-ml]
-         [--model=<path>]]
+         [--no-history-db]] [[--html-report=<path>]] [[--no-whois]]
+         [[--threads=<n>]] [[--no-ml] [--model=<path>]]
 
 Analyzes URLs, TLS certificates, and .eml email files for phishing indicators,
 and combines whatever it finds into a single 0-100 risk score with a
@@ -260,6 +264,11 @@ Network options:
                                offline/fast scans or CI); domain age is then
                                left out of the score entirely
 
+Batch options:
+      --threads=<n>          Scan --batch URLs on this many threads in parallel
+                               (default: one per CPU core; 1 scans them one at
+                               a time). Output order is the same either way.
+
 Machine learning options (experimental):
       --no-ml                Skip the experimental ML phishing-probability
                                signal entirely; the rule-based risk score is
@@ -277,13 +286,14 @@ Examples:
   phishnet history list        (past scans; see: phishnet history --help)
   phishnet model info          (ML model details; see: phishnet model --help)
   phishnet monitor --help      (watch a mailbox for phishing as mail arrives)
+  phishnet queue --help        (distributed scanning with Redis workers)
 
 See the project README for the full option reference and sample output.
 ```
 
 ```
 $ java -jar target/phishnet.jar --version
-phishnet 2.5.0
+phishnet 2.6.0
 ```
 
 `--version` always reflects the version actually built (Maven filters it into
@@ -343,6 +353,9 @@ java -jar target/phishnet.jar --batch urls.txt --html-report scan-report.html
 # Offline/fast scan: skip the WHOIS domain-age lookup entirely
 java -jar target/phishnet.jar --batch urls.txt --no-whois
 
+# Scan a batch on 16 threads (default: one per CPU core; see Parallel & Distributed Scanning)
+java -jar target/phishnet.jar --batch urls.txt --threads 16
+
 # Leave out the experimental ML confidence line (see Machine Learning Layer below)
 java -jar target/phishnet.jar --url "https://example.com" --no-ml
 
@@ -372,6 +385,9 @@ data to estimate one:
 
 It respects the other output modes instead of fighting them:
 
+- With `--threads` above 1 (the default on multi-core machines), URLs finish out of order; the
+  bar counts each one as it finishes, so it stays accurate, and the report still lists them in
+  input order.
 - Default / `--verbose`: the bar shows during scanning, then the normal per-item/summary report
   prints afterwards - scanning and printing are already separate phases, so the bar never lands
   in the middle of a report line.
@@ -1264,6 +1280,144 @@ docker run --rm -e PHISHNET_MAIL_PASSWORD -v phishnet-history:/home/phishnet/.ph
   ghcr.io/deipedra34/phishnet-detector monitor --host imap.gmail.com --username you@gmail.com --ssl
 ```
 
+## Parallel & Distributed Scanning
+
+### Parallel `--batch` (local)
+
+`--batch` scans its URLs on a pool of worker threads - one per CPU core by
+default. Most of a URL scan is spent waiting on the live WHOIS lookup, so
+running several at once can make a large batch finish several times faster.
+
+```bash
+# Default: one thread per CPU core
+java -jar target/phishnet.jar --batch urls.txt
+
+# Choose the number of threads (1-256); --threads 1 scans one URL at a time, as before
+java -jar target/phishnet.jar --batch urls.txt --threads 16
+```
+
+Only the scanning itself runs in parallel - parsing, WHOIS, scoring, and the
+ML prediction. Everything with side effects stays on one thread:
+
+- **Same output, whatever the thread count.** The report, `--json`, the HTML
+  report, and the scan history rows all come out in the order of the input
+  file, exactly as a one-at-a-time scan would write them. Results that finish
+  early simply wait for the ones before them.
+- **The progress bar** advances as each URL finishes, in whatever order they
+  finish, so it stays accurate.
+- **History** is still written one row per URL as results come in, so an
+  interrupted batch keeps what it had scanned. No row is lost or written twice.
+- **WHOIS**: a domain that appears many times in one batch is still looked up
+  only once - threads asking for the same domain wait for the one lookup in
+  flight instead of starting their own.
+
+### Distributed scanning with Redis (optional)
+
+For lists too big for one machine, `phishnet queue` spreads the work over any
+number of worker processes - on one machine or many - through a shared job
+queue in [Redis](https://redis.io):
+
+- `phishnet queue produce` reads URLs from a file and pushes each one onto a
+  Redis list as a job.
+- `phishnet queue worker` takes jobs off the list and scans them with the same
+  pipeline as `--batch`, recording every result in its scan history (CSV and
+  SQLite, the same files and options as for any scan). Start as many workers
+  as you like; each job goes to exactly one of them.
+
+Redis is only needed for these two commands. Nothing else - scans, `serve`,
+`monitor`, `history` - ever connects to it or needs it installed.
+
+**Walkthrough** (one machine; for several, point `--redis-host` at the Redis
+machine):
+
+```bash
+# 1. Start Redis (or use one you already run)
+docker run -d --name phishnet-redis -p 6379:6379 redis
+
+# 2. Queue the URLs - same file format as --batch: one per line, '#' comments allowed
+java -jar target/phishnet.jar queue produce --file urls.txt
+#   Queued 1200 job(s) on Redis list "phishnet:jobs" on localhost:6379; 1200 waiting in total.
+
+# 3. Start workers - in several terminals, or on several machines
+java -jar target/phishnet.jar queue worker --threads 8
+java -jar target/phishnet.jar queue worker --redis-host redis.internal --retry
+```
+
+```
+$ java -jar target/phishnet.jar queue worker --threads 8
+PhishNet queue worker: 8 thread(s) taking jobs from Redis list "phishnet:jobs" on localhost:6379. Press Ctrl+C to stop.
+[10:00:01] HIGH 70/100  http://paypa1-secure-login.tk/verify?redirect=http://evil.tk/x
+  signals: suspiciousTld, typosquatting, nestedRedirect
+[10:00:01] LOW 0/100  https://github.com/login
+...
+^C[10:04:12] Worker stopped. Scanned 1200 job(s): 85 high, 214 medium risk.
+```
+
+Workers run until Ctrl+C. A job being scanned when you press it is finished
+and recorded first. With `--exit-when-empty`, a worker stops by itself once
+the queue is empty - handy for one-off runs and scripts.
+
+| Option | Applies to | Meaning |
+| --- | --- | --- |
+| `--redis-host <host>`, `--redis-port <port>` | both | Where Redis is (default `localhost:6379`) |
+| `--redis-ssl` | both | Connect to Redis over TLS |
+| `--queue <name>` | both | Name of the Redis list used as the queue (default `phishnet:jobs`); separate names make separate queues |
+| `--file <urls.txt>` | produce | URLs to queue (required) |
+| `--threads <n>` | worker | Jobs scanned in parallel, each thread with its own Redis connection (default: one per CPU core) |
+| `--retry` | worker | Keep retrying with backoff (2 s, doubling up to 1 min) when Redis is unreachable or the connection drops, instead of stopping |
+| `--exit-when-empty` | worker | Stop once the queue is empty |
+| `--no-whois`, `--config`, `--history-file`, `--no-history`, `--history-db`, `--no-history-db` | worker | Same as for `--batch` |
+| `-v` / `-q`, `--no-color` | worker | Verbose (every signal, domain age, queue time, thread) or quiet (`LEVEL SCORE TARGET` per job) |
+
+If your Redis requires a login, set `PHISHNET_REDIS_PASSWORD` (and
+`PHISHNET_REDIS_USERNAME` for a Redis ACL user) in the environment - there's
+no command-line option for the password, so it can't end up in your shell
+history. It's never printed.
+
+**When Redis is unreachable**, both commands say so plainly and exit with
+code 1:
+
+```
+Error: can't reach Redis at localhost:6379: Failed to connect to localhost:6379.
+Is Redis running and reachable? For a local one: docker run -d --name phishnet-redis -p 6379:6379 redis
+```
+
+A worker started with `--retry` waits and reconnects instead, and keeps
+working through a Redis restart or a network blip. Without `--retry`, a
+connection that drops stops the worker with the same kind of message. A wrong
+password always stops it (retrying can't fix that).
+
+**Good to know:**
+
+- **At-most-once delivery.** A worker removes a job from the queue as it takes
+  it (`BRPOP`). If a worker is killed abruptly (not Ctrl+C) mid-scan, that one
+  job is not handed to another worker - queue it again if you need it.
+- **Results stay with each worker.** Every worker writes its own scan history;
+  with workers on several machines, the results are spread across them.
+  Several workers on the *same* machine can safely share one CSV file and one
+  database: CSV appends hold a file lock, and SQLite serializes the writes.
+- **Each job is one URL.** A job can also be pushed by hand as a bare URL,
+  e.g. `redis-cli LPUSH phishnet:jobs https://example.com`. Lines that aren't
+  usable jobs are skipped with a warning.
+- **WHOIS in workers** is looked up fresh for every job, since a worker may
+  run for days and a cached result (or a server marked as failed) shouldn't
+  live that long. Use `--no-whois` for faster, offline scanning.
+
+**With Docker**, run Redis and the workers on a shared Docker network:
+
+```bash
+docker network create phishnet
+docker run -d --name phishnet-redis --network phishnet redis
+
+# Queue a file from the current directory
+docker run --rm --network phishnet -v "$PWD:/data" \
+  ghcr.io/deipedra34/phishnet-detector queue produce --file urls.txt --redis-host phishnet-redis
+
+# A worker that keeps its history in a named volume and survives Redis restarts
+docker run -d --name phishnet-worker-1 --network phishnet -v phishnet-history:/home/phishnet/.phishnet \
+  ghcr.io/deipedra34/phishnet-detector queue worker --redis-host phishnet-redis --retry
+```
+
 ## Docker
 
 A prebuilt multi-arch image (`linux/amd64`, `linux/arm64`) is published to
@@ -1474,6 +1628,26 @@ settings never contain the password; `MonitorCommandTest` drives
 `phishnet monitor` end to end, including password handling and history output.
 The IMAP and POP3 connection classes themselves need a real server and aren't
 exercised by the suite.
+Parallel and distributed scanning: `ParallelScannerTest` checks that every job
+runs exactly once, that results come back in input order while progress counts
+completions, and that jobs really overlap; `ConcurrentHistoryTest` has eight
+threads write 400 rows at once to one CSV file (through one writer, and through
+a writer per thread as separate processes would), to the SQLite database, and
+through the WHOIS cache, asserting no row is lost, torn, or duplicated and that
+one domain costs one lookup; `MainTest` checks that `--batch` output, JSON, and
+history are identical with 1 and 8 threads. The Redis queue is tested against
+[jedis-mock](https://github.com/fppt/jedis-mock), an in-process Redis
+server, so CI needs no Redis: `RedisJobQueueTest` covers FIFO order, chunked
+pushes, competing consumers, and connection errors; `QueueCommandTest` runs
+`queue produce` and `queue worker` end to end, including two workers splitting
+one queue with no job lost or scanned twice; `QueueWorkerTest` covers the
+reconnect backoff and shutdown with an in-memory queue. One smoke test against
+a real Redis server is tagged `redis` and skipped by default:
+
+```bash
+docker run -d --name phishnet-redis -p 6379:6379 redis
+mvn test -Dgroups=redis -DexcludedGroups=none
+```
 Edge-case coverage includes empty/null/blank/whitespace-only and
 special-character-only input, multi-thousand-character URLs, malformed URLs
 (missing scheme, invalid characters, multiple `://`, trailing garbage),
@@ -1484,7 +1658,7 @@ or empty sections (brands, TLDs, weights).
 `mvn test` runs [JaCoCo](https://www.jacoco.org/jacoco/) automatically and
 generates an HTML report at `target/site/jacoco/index.html` - open that file
 in a browser for a line-by-line, package-by-package breakdown. The suite
-(510 tests as of this writing) maintains roughly **90% line / 80% branch**
+(556 tests as of this writing) maintains roughly **90% line / 80% branch**
 coverage overall; the biggest remaining gaps are `SslChecker`'s real-socket
 TLS handshake path and `SocketWhoisClient`'s port-43 I/O, which by design
 aren't exercised without a live network connection (the certificate-decision
@@ -1506,8 +1680,10 @@ src/main/java/com/phishnet/
   analyzer/   UrlAnalyzer, SslChecker, EmailAnalyzer, DomainAgeChecker, WhoisClient, SocketWhoisClient
   model/      Signal, RiskScore, UrlComponents, PhishNetConfig, ...
   scoring/    RiskScorer
-  cli/        Main (picocli @Command), ServeCommand, HistoryCommand, ModelCommand, MonitorCommand, ReportFormatter, Reporter, HistoryReporter, MonitorReporter, OutputLevel, HistoryWriter, HtmlReportWriter
+  cli/        Main (picocli @Command), ServeCommand, HistoryCommand, ModelCommand, MonitorCommand, QueueCommand, ReportFormatter, Reporter, HistoryReporter, MonitorReporter, QueueWorkerReporter, OutputLevel, HistoryWriter, HtmlReportWriter
   history/    HistoryDatabase (SQLite scan history), HistoryEntry, HistoryFilter, HistoryStats
+  batch/      ParallelScanner (thread pool + bounded job queue), UrlScanner (shared URL scan pipeline)
+  queue/      QueueWorker, JobQueue, RedisJobQueue, RedisSettings, ScanJob (Redis-based distributed mode)
   ml/         FeatureVector, FeatureExtractor, LogisticRegression, TrainingData, MlModel, MlScorer, MlPrediction (experimental ML layer)
   mail/       MailMonitorService, MailSource, ImapMailSource, Pop3MailSource, MessageConverter, MonitorActions, Backoff, MailServerSettings (mailbox monitoring)
   api/        ApiServer (Javalin routes, validation, JSON errors), ScanService (analyzer/scorer wrapper)

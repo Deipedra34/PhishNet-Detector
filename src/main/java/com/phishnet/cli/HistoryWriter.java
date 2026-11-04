@@ -4,11 +4,12 @@ import com.phishnet.model.DomainAgeResult;
 import com.phishnet.model.RiskScore;
 import com.phishnet.model.Signal;
 
-import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.PrintStream;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.Instant;
@@ -24,6 +25,11 @@ import java.util.stream.Collectors;
  *
  * <p>Rows are written incrementally (the file is opened and closed per row) so a
  * long {@code --batch} run that is interrupted still leaves partial history on disk.
+ *
+ * <p>Safe for concurrent use: appends are serialized across every writer in this JVM
+ * (parallel batch scans, multi-threaded queue workers), and each append holds an
+ * exclusive file lock, so separate processes appending to the same file (several
+ * queue workers on one machine) can't interleave rows or write the header twice.
  */
 public final class HistoryWriter {
 
@@ -34,6 +40,14 @@ public final class HistoryWriter {
     }
 
     static final String HEADER = "timestamp,target,type,risk_score,risk_label,signals,domain_age_days";
+
+    /**
+     * One lock for all writers in this JVM. A file lock is held per process, so two
+     * writers here locking the same file at once would fail with
+     * OverlappingFileLockException rather than wait; rows are tiny, so serializing
+     * every append costs nothing measurable.
+     */
+    private static final Object APPEND_LOCK = new Object();
 
     private final Path file;
     private final boolean enabled;
@@ -84,21 +98,21 @@ public final class HistoryWriter {
                 csvField(signals),
                 csvField(domainAgeField(domainAge)));
 
-        try {
-            boolean needHeader = !Files.exists(file) || Files.size(file) == 0;
-            try (BufferedWriter writer = Files.newBufferedWriter(file, StandardCharsets.UTF_8,
-                    StandardOpenOption.CREATE, StandardOpenOption.APPEND)) {
-                if (needHeader) {
-                    writer.write(HEADER);
-                    writer.write("\n");
+        synchronized (APPEND_LOCK) {
+            try (FileChannel channel = FileChannel.open(file, StandardOpenOption.CREATE, StandardOpenOption.WRITE,
+                    StandardOpenOption.APPEND);
+                 FileLock lock = channel.lock()) {
+                // Checked under the lock, so only the first of several concurrent writers adds the header.
+                String text = (channel.size() == 0 ? HEADER + "\n" : "") + row + "\n";
+                ByteBuffer bytes = ByteBuffer.wrap(text.getBytes(StandardCharsets.UTF_8));
+                while (bytes.hasRemaining()) {
+                    channel.write(bytes);
                 }
-                writer.write(row);
-                writer.write("\n");
-            }
-        } catch (IOException e) {
-            if (!warned) {
-                err.println("Warning: could not write scan history to " + file + ": " + e.getMessage());
-                warned = true;
+            } catch (IOException e) {
+                if (!warned) {
+                    err.println("Warning: could not write scan history to " + file + ": " + e.getMessage());
+                    warned = true;
+                }
             }
         }
     }

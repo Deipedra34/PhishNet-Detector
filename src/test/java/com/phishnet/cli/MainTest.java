@@ -964,6 +964,92 @@ class MainTest {
         return value.equals(">99") ? 100 : value.equals("<1") ? 0 : Integer.parseInt(value);
     }
 
+    // --- parallel batch scanning --------------------------------------------------
+
+    /** Real-world-style fixtures, twice over (repeated domains included), as one batch file. */
+    private static Path fixtureBatch(Path dir) throws IOException {
+        List<String> urls = new java.util.ArrayList<>();
+        for (String fixture : List.of("phishing_urls.txt", "legitimate_urls.txt")) {
+            try (var in = MainTest.class.getResourceAsStream("/urls/" + fixture)) {
+                urls.addAll(new String(in.readAllBytes(), StandardCharsets.UTF_8).lines().toList());
+            }
+        }
+        urls.addAll(List.copyOf(urls));
+        Path file = dir.resolve("urls.txt");
+        Files.write(file, urls, StandardCharsets.UTF_8);
+        return file;
+    }
+
+    /** CSV rows without the timestamp column, which naturally differs between runs. */
+    private static List<String> rowsWithoutTimestamps(Path csv) throws IOException {
+        return Files.readAllLines(csv, StandardCharsets.UTF_8).stream()
+                .map(line -> line.substring(line.indexOf(',') + 1))
+                .toList();
+    }
+
+    @Test
+    void batchOutputIsIdenticalWhateverTheThreadCount(@TempDir Path tempDir) throws Exception {
+        Path urls = fixtureBatch(tempDir);
+        Path oneThreadCsv = tempDir.resolve("one.csv");
+        Path manyThreadsCsv = tempDir.resolve("many.csv");
+
+        Captured one = runMain("--batch", urls.toString(), "--threads", "1", "--history-file", oneThreadCsv.toString());
+        Captured many = runMain("--batch", urls.toString(), "--threads", "8", "--history-file", manyThreadsCsv.toString());
+        Captured oneJson = runMain("--batch", urls.toString(), "--threads", "1", "--json");
+        Captured manyJson = runMain("--batch", urls.toString(), "--threads", "8", "--json");
+
+        assertEquals(0, many.exitCode(), many.stderr());
+        assertEquals(one.stdout(), many.stdout(), "report order and content don't depend on --threads");
+        assertEquals(oneJson.stdout(), manyJson.stdout());
+        List<String> rows = rowsWithoutTimestamps(manyThreadsCsv);
+        assertEquals(rowsWithoutTimestamps(oneThreadCsv), rows, "history rows stay in input order");
+        long urlCount = Files.readAllLines(urls).stream().filter(l -> !l.isBlank() && !l.startsWith("#")).count();
+        assertEquals(urlCount + 1, rows.size(), "every URL recorded exactly once");
+    }
+
+    @Test
+    void parallelBatchRecordsEveryUrlInTheDatabaseOnce(@TempDir Path tempDir) throws Exception {
+        Path urls = tempDir.resolve("urls.txt");
+        List<String> lines = java.util.stream.IntStream.range(0, 60)
+                .mapToObj(i -> "http://site-" + i + ".tk/login").toList();
+        Files.write(urls, lines, StandardCharsets.UTF_8);
+        Path database = tempDir.resolve("history.db");
+
+        Captured result = runMain("--batch", urls.toString(), "--threads", "6", "--history-db", database.toString());
+
+        assertEquals(0, result.exitCode(), result.stderr());
+        List<HistoryEntry> entries = new HistoryDatabase(database, false, System.err).search(HistoryFilter.recent(0));
+        assertEquals(60, entries.size());
+        assertEquals(new java.util.HashSet<>(lines),
+                entries.stream().map(HistoryEntry::target).collect(java.util.stream.Collectors.toSet()));
+    }
+
+    @Test
+    void parallelBatchStillLooksUpARepeatedDomainOnce(@TempDir Path tempDir) throws Exception {
+        Path urls = tempDir.resolve("urls.txt");
+        Files.write(urls, java.util.stream.IntStream.range(0, 20)
+                .mapToObj(i -> "https://fresh-site.com/page" + i).toList(), StandardCharsets.UTF_8);
+        AtomicInteger calls = new AtomicInteger();
+
+        Captured result = runMainWithWhois(registryReporting(10, calls), "--batch", urls.toString(), "--threads", "8");
+
+        assertEquals(0, result.exitCode(), result.stderr());
+        assertEquals(1, calls.get(), "concurrent threads share one lookup per domain");
+        assertEquals(20, countOccurrences(result.stdout(), "Domain Age: 10 days"));
+    }
+
+    @Test
+    void threadsOptionIsValidatedAndDocumented() {
+        assertEquals(2, runMain("--batch", "x.txt", "--threads", "0").exitCode());
+        assertEquals(2, runMain("--batch", "x.txt", "--threads", "257").exitCode());
+        assertTrue(runMain("--batch", "x.txt", "--threads", "0").stderr().contains("--threads"));
+
+        String help = runMain("--help").stdout();
+        assertTrue(help.contains("Batch options:"), help);
+        assertTrue(help.contains("--threads=<n>"), help);
+        assertTrue(help.contains("phishnet queue --help"), help);
+    }
+
     private static String riskScoreLine(String stdout) {
         return stdout.lines().filter(l -> l.startsWith("Risk Score:")).findFirst().orElse("");
     }

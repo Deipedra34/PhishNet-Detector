@@ -6,7 +6,7 @@
 
     <groupId>com.phishnet</groupId>
     <artifactId>phishnet-detector</artifactId>
-    <version>2.5.0</version>
+    <version>2.6.0</version>
     <packaging>jar</packaging>
 
     <name>PhishNet Detector</name>
@@ -25,6 +25,8 @@
         <picocli.version>4.7.6</picocli.version>
         <javalin.version>7.2.3</javalin.version>
         <sqlite.jdbc.version>3.53.4.0</sqlite.jdbc.version>
+        <jedis.version>8.0.2</jedis.version>
+        <jedis.mock.version>1.1.21</jedis.mock.version>
         <!-- Matches the slf4j-api version Javalin depends on -->
         <slf4j.version>2.0.18</slf4j.version>
 
@@ -36,9 +38,10 @@
 
         <main.class>com.phishnet.cli.Main</main.class>
 
-        <!-- Tests tagged "network" make real WHOIS connections; keep them out of the
-             default (and CI) run. Opt in with: mvn test -Dgroups=network -DexcludedGroups=none -->
-        <excludedGroups>network</excludedGroups>
+        <!-- Tests tagged "network" make real WHOIS connections, and tests tagged "redis" need a
+             running Redis server; keep both out of the default (and CI) run. Opt in with e.g.
+             mvn test -Dgroups=network -DexcludedGroups=none   or   mvn test -Dgroups=redis -DexcludedGroups=none -->
+        <excludedGroups>network,redis</excludedGroups>
     </properties>
 
     <dependencies>
@@ -102,7 +105,22 @@
             <version>${sqlite.jdbc.version}</version>
         </dependency>
 
+        <!-- Redis client for the optional distributed mode (phishnet queue produce/worker).
+             Only those commands use it; no other feature needs a Redis server. -->
+        <dependency>
+            <groupId>redis.clients</groupId>
+            <artifactId>jedis</artifactId>
+            <version>${jedis.version}</version>
+        </dependency>
+
         <!-- Test dependencies -->
+        <!-- In-process, pure-Java fake Redis server, so the queue tests need no real Redis. -->
+        <dependency>
+            <groupId>com.github.fppt</groupId>
+            <artifactId>jedis-mock</artifactId>
+            <version>${jedis.mock.version}</version>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
