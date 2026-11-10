@@ -1,5 +1,6 @@
 package com.phishnet.cli;
 
+import com.phishnet.feeds.FeedStatus;
 import com.phishnet.ml.MlPrediction;
 import com.phishnet.model.DomainAgeResult;
 import com.phishnet.model.EmailAnalysisResult;
@@ -11,6 +12,7 @@ import com.phishnet.model.UrlComponents;
 import com.phishnet.util.AnsiColor;
 
 import java.io.PrintStream;
+import java.util.List;
 
 /**
  * The one place all CLI text output goes through. Analyzers and the scorer
@@ -20,17 +22,29 @@ import java.io.PrintStream;
  *
  * QUIET always prints exactly one plain line and never uses color, no
  * matter what colorEnabled was passed in.
+ *
+ * Threat feed matches are ordinary signals, so they show up in NORMAL and
+ * VERBOSE like any other ("Known phishing URL (OpenPhish)", plus the matched
+ * entry in VERBOSE). VERBOSE also lists each feed's status, so "not listed"
+ * can be told apart from "no feed data".
  */
 public final class Reporter {
 
     private final PrintStream out;
     private final OutputLevel level;
     private final boolean colorEnabled;
+    private final List<FeedStatus> feedStatuses;
 
     public Reporter(PrintStream out, OutputLevel level, boolean colorEnabled) {
+        this(out, level, colorEnabled, List.of());
+    }
+
+    /** @param feedStatuses the threat feeds' state for this run, listed in VERBOSE output */
+    public Reporter(PrintStream out, OutputLevel level, boolean colorEnabled, List<FeedStatus> feedStatuses) {
         this.out = out;
         this.level = level;
         this.colorEnabled = colorEnabled && level != OutputLevel.QUIET;
+        this.feedStatuses = List.copyOf(feedStatuses);
     }
 
     public OutputLevel level() {
@@ -55,6 +69,7 @@ public final class Reporter {
         printSummary(target, score, domainAge, ml);
         if (level == OutputLevel.VERBOSE) {
             printUrlDetails(result.components(), ml);
+            printThreatFeeds();
         }
     }
 
@@ -66,6 +81,7 @@ public final class Reporter {
         printSummary(target, score, DomainAgeResult.skipped(), null);
         if (level == OutputLevel.VERBOSE) {
             printEmailDetails(result);
+            printThreatFeeds();
         }
     }
 
@@ -88,6 +104,23 @@ public final class Reporter {
             return;
         }
         out.println("Summary: " + total + " URL(s) analyzed - " + high + " high risk, " + medium + " medium risk");
+        if (level == OutputLevel.VERBOSE) {
+            printThreatFeeds();
+        }
+    }
+
+    /**
+     * "Threat Feeds:" and one line per feed. Nothing when feeds are off for the
+     * run (--no-threat-feeds), the same way a skipped WHOIS lookup prints nothing.
+     */
+    private void printThreatFeeds() {
+        if (feedStatuses.stream().allMatch(status -> status.state() == FeedStatus.State.OFF)) {
+            return;
+        }
+        out.println("Threat Feeds:");
+        for (FeedStatus status : feedStatuses) {
+            out.println("  " + status.source().displayName() + ": " + status.describe());
+        }
     }
 
     // --- summary block, shared by NORMAL and VERBOSE ------------------------

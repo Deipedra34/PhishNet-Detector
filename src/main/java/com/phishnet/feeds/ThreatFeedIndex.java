@@ -1,9 +1,15 @@
 package com.phishnet.feeds;
 
+import com.phishnet.model.Signal;
+import com.phishnet.model.SignalCategory;
+import com.phishnet.scoring.RiskScorer;
+
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * The feeds available to one run, ready for lookups: every cached snapshot
@@ -70,6 +76,53 @@ public final class ThreatFeedIndex {
             }
         }
         return matches;
+    }
+
+    /**
+     * The scoring signals for {@code rawUrl}: one {@value RiskScorer#KNOWN_PHISHING_URL}
+     * signal if any feed lists this exact URL, labeled with every feed that does
+     * ("Known phishing URL (OpenPhish, PhishTank)"); otherwise one
+     * {@value RiskScorer#KNOWN_PHISHING_DOMAIN} signal if any feed lists other URLs on
+     * its host. Never both, and never one per feed, so being listed twice doesn't
+     * count twice. Empty if nothing matches or no feed data is loaded.
+     */
+    public List<Signal> signalsFor(String rawUrl) {
+        return signalsForAny(List.of(rawUrl));
+    }
+
+    /**
+     * Like {@link #signalsFor(String)}, but over several URLs at once (the links
+     * in an email): still at most one feed signal in total, a URL-level one if
+     * any of them is listed, otherwise a domain-level one if any of their hosts is.
+     */
+    public List<Signal> signalsForAny(Collection<String> rawUrls) {
+        List<FeedMatch> matches = new ArrayList<>();
+        for (String rawUrl : rawUrls) {
+            matches.addAll(matches(rawUrl));
+        }
+        List<FeedMatch> urlMatches = matches.stream().filter(m -> m.kind() == FeedMatch.Kind.URL).toList();
+        if (!urlMatches.isEmpty()) {
+            return List.of(new Signal(RiskScorer.KNOWN_PHISHING_URL, SignalCategory.URL,
+                    "Known phishing URL (" + sources(urlMatches) + ")", evidence(urlMatches)));
+        }
+        if (!matches.isEmpty()) {
+            return List.of(new Signal(RiskScorer.KNOWN_PHISHING_DOMAIN, SignalCategory.DOMAIN,
+                    "Known phishing domain (" + sources(matches) + "): other URLs on this host are listed",
+                    evidence(matches)));
+        }
+        return List.of();
+    }
+
+    private static String sources(List<FeedMatch> matches) {
+        return matches.stream().map(m -> m.source().displayName()).distinct().collect(Collectors.joining(", "));
+    }
+
+    private static String evidence(List<FeedMatch> matches) {
+        return matches.stream()
+                .distinct()
+                .map(m -> m.entry() + " listed in " + m.source().displayName() + ", feed refreshed "
+                        + m.snapshot().refreshedAt())
+                .collect(Collectors.joining("; "));
     }
 
     /** {@code host} is a shared host itself, or a subdomain of one listed with a leading dot. */

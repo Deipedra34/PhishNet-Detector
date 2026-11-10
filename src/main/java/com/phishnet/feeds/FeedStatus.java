@@ -33,4 +33,33 @@ public record FeedStatus(FeedSource source, State state, Instant refreshedAt, in
             return this == FRESH || this == STALE;
         }
     }
+
+    /**
+     * One line for reports, e.g. "fresh, 41,230 entries, refreshed 2026-11-10T09:00:00Z"
+     * or "not configured: no API key configured (...)". Without the feed's name.
+     */
+    public String describe() {
+        StringBuilder text = new StringBuilder();
+        switch (state) {
+            case FRESH, STALE -> text.append(state == State.FRESH ? "fresh" : "stale")
+                    .append(", ").append(entryCount(entries)).append(", refreshed ")
+                    .append(refreshedAt);
+            case MISSING -> text.append("unavailable (no cached copy yet)");
+            case DISABLED -> text.append("disabled");
+            case NOT_CONFIGURED -> text.append("not configured");
+            case OFF -> text.append("off");
+        }
+        if (detail != null && !detail.isEmpty()) {
+            text.append(state == State.FRESH || state == State.STALE || state == State.MISSING ? "; " : ": ")
+                    .append(detail);
+        } else if (lastError != null && state != State.FRESH) {
+            text.append("; last download failed: ").append(lastError);
+        }
+        return text.toString();
+    }
+
+    /** "1 entry", "41,230 entries". */
+    public static String entryCount(int entries) {
+        return String.format("%,d %s", entries, entries == 1 ? "entry" : "entries");
+    }
 }
