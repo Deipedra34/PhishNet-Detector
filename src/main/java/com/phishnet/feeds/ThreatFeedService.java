@@ -103,6 +103,11 @@ public final class ThreatFeedService {
         return offline;
     }
 
+    /** The clock freshness is judged by (fixed in tests). */
+    public Clock clock() {
+        return clock;
+    }
+
     /** Whether {@code source} is switched on in the config. */
     public boolean isEnabled(FeedSource source) {
         return switch (source) {

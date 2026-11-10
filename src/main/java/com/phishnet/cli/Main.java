@@ -72,7 +72,7 @@ import java.util.function.Function;
                 "  phishnet model info          (ML model details; see: phishnet model --help)",
                 "  phishnet monitor --help      (watch a mailbox for phishing as mail arrives)",
                 "  phishnet queue --help        (distributed scanning with Redis workers)",
-                "  phishnet feeds update        (refresh threat intelligence feeds; see: phishnet feeds --help)",
+                "  phishnet feeds status        (threat intelligence feeds; see: phishnet feeds --help)",
                 "",
                 "See the project README for the full option reference and sample output."
         }
