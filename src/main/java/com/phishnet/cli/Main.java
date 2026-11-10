@@ -7,6 +7,9 @@ import com.phishnet.analyzer.UrlAnalyzer;
 import com.phishnet.analyzer.WhoisClient;
 import com.phishnet.batch.ParallelScanner;
 import com.phishnet.batch.UrlScanner;
+import com.phishnet.feeds.ThreatFeedIndex;
+import com.phishnet.feeds.ThreatFeedService;
+import com.phishnet.feeds.ThreatFeedSettings;
 import com.phishnet.history.HistoryDatabase;
 import com.phishnet.ml.MlPrediction;
 import com.phishnet.ml.MlScorer;
@@ -15,6 +18,7 @@ import com.phishnet.model.EmailAnalysisResult;
 import com.phishnet.model.PhishNetConfig;
 import com.phishnet.model.RiskLevel;
 import com.phishnet.model.RiskScore;
+import com.phishnet.model.Signal;
 import com.phishnet.model.UrlAnalysisResult;
 import com.phishnet.scoring.RiskScorer;
 import com.phishnet.util.ColorSupport;
@@ -40,6 +44,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Properties;
 import java.util.concurrent.Callable;
+import java.util.function.Function;
 
 /**
  * Command-line entry point for PhishNet Detector, built on
@@ -190,6 +195,11 @@ public final class Main implements Callable<Integer> {
                 description = "Skip the live WHOIS domain-age lookup (for offline/fast scans or CI); "
                         + "domain age is then left out of the score entirely")
         private boolean noWhois;
+
+        @Option(names = "--no-threat-feeds",
+                description = "Don't check the OpenPhish/PhishTank threat intelligence feeds (no feed "
+                        + "downloads, cached feeds unused); feed matches are then left out of the score")
+        private boolean noThreatFeeds;
     }
 
     // --- batch options ---------------------------------------------------------
@@ -229,6 +239,7 @@ public final class Main implements Callable<Integer> {
     private PrintStream out;
     private PrintStream err;
     private WhoisClient whoisClient;
+    private Function<ThreatFeedSettings, ThreatFeedService> threatFeeds;
 
     private Main() {
     }
@@ -247,11 +258,25 @@ public final class Main implements Callable<Integer> {
 
     /** Runs against injected streams and returns an exit code - never calls System.exit itself, so it's testable. */
     static int run(String[] args, PrintStream out, PrintStream err) {
-        return run(args, out, err, new SocketWhoisClient());
+        return run(args, out, err, new SocketWhoisClient(), ThreatFeedService::live);
     }
 
-    /** Same as {@link #run(String[], PrintStream, PrintStream)}, with the WHOIS transport swapped out (for tests). */
+    /**
+     * Same as {@link #run(String[], PrintStream, PrintStream)}, with the WHOIS transport
+     * swapped out (for tests). Threat feeds are offline here - no downloads, no cache
+     * in the home directory - so a test's result never depends on today's feeds.
+     */
     static int run(String[] args, PrintStream out, PrintStream err, WhoisClient whoisClient) {
+        return run(args, out, err, whoisClient, ThreatFeedService::offline);
+    }
+
+    /**
+     * Same as {@link #run(String[], PrintStream, PrintStream, WhoisClient)}, with the
+     * threat feed service built by {@code threatFeeds} from the config's feed settings
+     * (for tests that serve canned feeds).
+     */
+    static int run(String[] args, PrintStream out, PrintStream err, WhoisClient whoisClient,
+                   Function<ThreatFeedSettings, ThreatFeedService> threatFeeds) {
         // "serve" is dispatched here instead of being registered as a picocli subcommand:
         // picocli would still enforce this command's required --url/--email/--batch group
         // for "phishnet serve", and relaxing that group would change normal CLI parsing.
@@ -287,6 +312,7 @@ public final class Main implements Callable<Integer> {
         app.out = out;
         app.err = err;
         app.whoisClient = whoisClient;
+        app.threatFeeds = threatFeeds;
         return execute(new CommandLine(app), args, out, err);
     }
 
@@ -359,9 +385,17 @@ public final class Main implements Callable<Integer> {
         RiskScorer scorer = new RiskScorer(config);
         ReportFormatter formatter = new ReportFormatter();
 
+        // Loaded before anything is scanned. Never fails and never waits on a download
+        // for longer than the configured scan wait: a feed that can't be refreshed in
+        // time is used from cache, or left out if there's no cache yet.
+        ThreatFeedSettings feedSettings = config.threatFeeds().withEnvironment(System.getenv());
+        ThreatFeedIndex feeds = (network.noThreatFeeds
+                ? ThreatFeedService.offline(feedSettings)
+                : threatFeeds.apply(feedSettings)).loadForScan();
+
         OutputLevel level = outputLevel();
         boolean colorEnabled = ColorSupport.isEnabled(output.noColor);
-        Reporter reporter = new Reporter(out, level, colorEnabled);
+        Reporter reporter = new Reporter(out, level, colorEnabled, feeds.statuses());
 
         Path historyFile = history.file != null ? Path.of(history.file) : DEFAULT_HISTORY_FILE;
         HistoryWriter historyWriter = new HistoryWriter(historyFile, !history.disabled, err);
@@ -388,16 +422,16 @@ public final class Main implements Callable<Integer> {
 
         try {
             if (mode.url != null) {
-                return runUrl(mode.url, urlAnalyzer, domainAgeChecker, scorer, mlScorer, formatter, reporter,
+                return runUrl(mode.url, urlAnalyzer, domainAgeChecker, feeds, scorer, mlScorer, formatter, reporter,
                         historyWriter, historyDb, htmlReportWriter, output.json, out);
             } else if (mode.emailPath != null) {
-                return runEmail(mode.emailPath, emailAnalyzer, scorer, formatter, reporter, historyWriter,
+                return runEmail(mode.emailPath, emailAnalyzer, feeds, scorer, formatter, reporter, historyWriter,
                         historyDb, htmlReportWriter, output.json, out);
             } else {
                 ProgressListener progress = ProgressReporter.forBatch(
                         level, output.json, ColorSupport.isTty(), out, err, colorEnabled);
-                return runBatch(mode.batchPath, urlAnalyzer, domainAgeChecker, scorer, mlScorer, formatter, reporter,
-                        historyWriter, historyDb, htmlReportWriter, output.json, out, progress, threads);
+                return runBatch(mode.batchPath, urlAnalyzer, domainAgeChecker, feeds, scorer, mlScorer, formatter,
+                        reporter, historyWriter, historyDb, htmlReportWriter, output.json, out, progress, threads);
             }
         } catch (IOException e) {
             err.println("Error: " + e.getMessage());
@@ -414,12 +448,12 @@ public final class Main implements Callable<Integer> {
     }
 
     private static int runUrl(String url, UrlAnalyzer urlAnalyzer, DomainAgeChecker domainAgeChecker,
-                               RiskScorer scorer, MlScorer mlScorer, ReportFormatter formatter, Reporter reporter,
-                               HistoryWriter historyWriter, HistoryDatabase historyDb,
+                               ThreatFeedIndex feeds, RiskScorer scorer, MlScorer mlScorer, ReportFormatter formatter,
+                               Reporter reporter, HistoryWriter historyWriter, HistoryDatabase historyDb,
                                HtmlReportWriter htmlReportWriter, boolean json, PrintStream out) {
         UrlAnalysisResult result = urlAnalyzer.analyze(url);
         DomainAgeResult domainAge = domainAgeFor(result, domainAgeChecker);
-        RiskScore score = scorer.score(result.signals(), domainAge);
+        RiskScore score = scorer.score(withSignals(result.signals(), feeds.signalsFor(url)), domainAge);
         historyWriter.record(url, HistoryWriter.TargetType.URL, score, domainAge);
         historyDb.recordUrl(url, result.components(), score, domainAge);
         htmlReportWriter.write(List.of(new AnalysisEntry(url, score, HistoryWriter.TargetType.URL, domainAge)));
@@ -436,13 +470,25 @@ public final class Main implements Callable<Integer> {
         return checker == null ? DomainAgeResult.skipped() : checker.check(result.components());
     }
 
-    private static int runEmail(String emailPath, EmailAnalyzer emailAnalyzer, RiskScorer scorer,
-                                 ReportFormatter formatter, Reporter reporter, HistoryWriter historyWriter,
-                                 HistoryDatabase historyDb, HtmlReportWriter htmlReportWriter, boolean json,
-                                 PrintStream out) throws IOException {
+    /** {@code signals} with {@code extra} (threat feed signals, usually none) appended. */
+    private static List<Signal> withSignals(List<Signal> signals, List<Signal> extra) {
+        if (extra.isEmpty()) {
+            return signals;
+        }
+        List<Signal> all = new ArrayList<>(signals);
+        all.addAll(extra);
+        return all;
+    }
+
+    private static int runEmail(String emailPath, EmailAnalyzer emailAnalyzer, ThreatFeedIndex feeds,
+                                 RiskScorer scorer, ReportFormatter formatter, Reporter reporter,
+                                 HistoryWriter historyWriter, HistoryDatabase historyDb,
+                                 HtmlReportWriter htmlReportWriter, boolean json, PrintStream out) throws IOException {
         try (InputStream in = Files.newInputStream(Path.of(emailPath))) {
             EmailAnalysisResult result = emailAnalyzer.analyze(in);
-            RiskScore score = scorer.score(result.allSignals());
+            // Every link in the email is checked against the feeds; at most one feed signal in total.
+            List<String> links = result.linkResults().stream().map(link -> link.components().rawUrl()).toList();
+            RiskScore score = scorer.score(withSignals(result.allSignals(), feeds.signalsForAny(links)));
             historyWriter.record(emailPath, HistoryWriter.TargetType.EMAIL, score);
             historyDb.recordEmail(emailPath, result.senderAddress(), result.subject(), score);
             htmlReportWriter.write(List.of(new AnalysisEntry(emailPath, score, HistoryWriter.TargetType.EMAIL)));
@@ -458,7 +504,8 @@ public final class Main implements Callable<Integer> {
     }
 
     private static int runBatch(String batchPath, UrlAnalyzer urlAnalyzer, DomainAgeChecker domainAgeChecker,
-                                 RiskScorer scorer, MlScorer mlScorer, ReportFormatter formatter, Reporter reporter,
+                                 ThreatFeedIndex feeds, RiskScorer scorer, MlScorer mlScorer,
+                                 ReportFormatter formatter, Reporter reporter,
                                  HistoryWriter historyWriter, HistoryDatabase historyDb,
                                  HtmlReportWriter htmlReportWriter, boolean json, PrintStream out,
                                  ProgressListener progress, int threads) throws IOException {
@@ -480,7 +527,8 @@ public final class Main implements Callable<Integer> {
         // and the report entries in input order - the same order a one-at-a-time scan produced.
         // One DomainAgeChecker for the whole batch: it's thread-safe, and its cache means a
         // domain that appears many times is looked up once.
-        UrlScanner urlScanner = new UrlScanner(urlAnalyzer, result -> domainAgeFor(result, domainAgeChecker), scorer);
+        UrlScanner urlScanner =
+                new UrlScanner(urlAnalyzer, result -> domainAgeFor(result, domainAgeChecker), scorer, feeds);
         try {
             new ParallelScanner(threads).run(urls,
                     url -> {
