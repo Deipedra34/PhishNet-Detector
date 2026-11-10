@@ -10,19 +10,30 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
- * Downloads and caches threat intelligence feeds of known phishing URLs.
+ * Downloads, caches, and serves threat intelligence feeds of known phishing
+ * URLs, as an extra high-confidence signal next to the heuristic analyzers.
  *
- * {@link #refresh(FeedSource)} downloads one feed and replaces its cached copy
- * only if the download succeeds. A failed or empty download leaves the previous
- * copy in place and records the error, so a feed that can't be reached falls
- * back to its last good (if stale) copy instead of losing it. {@link #status()}
- * classifies each cached copy as fresh, stale, or missing against the
- * configured refresh interval.
+ * <b>A scan never fails or stalls on a feed.</b> {@link #loadForScan()} uses
+ * each feed's cached copy if it's fresh. If it's stale or missing, a refresh
+ * starts, and the scan waits for it for at most {@link ThreatFeedSettings#scanWait()}
+ * (all feeds in parallel). If the download isn't done by then or fails, the
+ * scan carries on with the stale copy, or without that feed if there's none.
+ * A slow download keeps running in the background and lands in the cache
+ * whenever it completes; cache writes are atomic, so a process exiting
+ * mid-download can't leave a broken file. {@link #refreshAll()} (behind
+ * {@code phishnet feeds update}) is the synchronous, full-timeout version.
  *
  * PhishTank needs an API key: without one ({@link ThreatFeedSettings#phishTankApiKey()})
  * it's reported as not configured and skipped, and everything else carries on.
@@ -36,6 +47,13 @@ public final class ThreatFeedService {
     public static Path defaultDirectory() {
         return FeedCache.defaultDirectory();
     }
+
+    /** Background refreshes run on daemon threads, so an unfinished one never keeps the JVM alive. */
+    private static final ExecutorService REFRESHER = Executors.newCachedThreadPool(task -> {
+        Thread thread = new Thread(task, "phishnet-feed-refresh");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     private final ThreatFeedSettings settings;
     private final FeedCache cache;
@@ -63,8 +81,9 @@ public final class ThreatFeedService {
     }
 
     /**
-     * A service that never downloads anything: every refresh is skipped. For
-     * runs that must not depend on the network or the user's home directory.
+     * A service that never downloads or reads anything: every scan gets an
+     * empty index. What {@code --no-threat-feeds} amounts to, and what tests use
+     * when they shouldn't depend on the network or the user's home directory.
      */
     public static ThreatFeedService offline(ThreatFeedSettings settings) {
         return new ThreatFeedService(settings, new FeedCache(defaultDirectory()), (uri, headers, timeout) -> {
@@ -167,6 +186,77 @@ public final class ThreatFeedService {
             case OPENPHISH -> FeedParser.parseOpenPhish(new InputStreamReader(in, StandardCharsets.UTF_8));
             case PHISHTANK -> FeedParser.parsePhishTank(in);
         };
+    }
+
+    // --- scanning -----------------------------------------------------------
+
+    /**
+     * The feeds for one run, refreshing stale or missing ones within the scan
+     * wait (see the class comment). Never throws, and never waits longer than
+     * {@link ThreatFeedSettings#scanWait()}.
+     */
+    public ThreatFeedIndex loadForScan() {
+        if (offline) {
+            return ThreatFeedIndex.empty(status());
+        }
+        Instant now = clock.instant();
+        Map<FeedSource, Optional<FeedSnapshot>> cached = new EnumMap<>(FeedSource.class);
+        Map<FeedSource, CompletableFuture<FeedRefreshResult>> refreshing = new EnumMap<>(FeedSource.class);
+        List<FeedStatus> statuses = new ArrayList<>();
+
+        for (FeedSource source : FeedSource.values()) {
+            if (skipReason(source).isPresent()) {
+                continue;
+            }
+            Optional<FeedSnapshot> snapshot = cache.read(source);
+            cached.put(source, snapshot);
+            Instant refreshedAt = snapshot.map(FeedSnapshot::refreshedAt).orElse(null);
+            if (FeedFreshness.of(refreshedAt, settings.refreshInterval(), now) != FeedFreshness.FRESH) {
+                refreshing.put(source, CompletableFuture.supplyAsync(() -> refresh(source), REFRESHER));
+            }
+        }
+
+        long deadline = System.nanoTime() + settings.scanWait().toNanos();
+        Map<FeedSource, String> notes = new EnumMap<>(FeedSource.class);
+        for (Map.Entry<FeedSource, CompletableFuture<FeedRefreshResult>> entry : refreshing.entrySet()) {
+            FeedSource source = entry.getKey();
+            try {
+                long remaining = Math.max(0, deadline - System.nanoTime());
+                FeedRefreshResult result = entry.getValue().get(remaining, TimeUnit.NANOSECONDS);
+                if (result.outcome() == FeedRefreshResult.Outcome.UPDATED) {
+                    cached.put(source, cache.read(source));
+                } else {
+                    notes.put(source, "refresh failed: " + result.message());
+                }
+            } catch (TimeoutException e) {
+                notes.put(source, "refresh still downloading in the background");
+            } catch (ExecutionException e) {
+                notes.put(source, "refresh failed: " + e.getCause());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                notes.put(source, "refresh interrupted");
+            }
+        }
+
+        List<FeedSnapshot> snapshots = new ArrayList<>();
+        for (FeedSource source : FeedSource.values()) {
+            Optional<String> skipReason = skipReason(source);
+            if (skipReason.isPresent()) {
+                statuses.add(skippedStatus(source, skipReason.get()));
+                continue;
+            }
+            Optional<FeedSnapshot> snapshot = cached.getOrDefault(source, Optional.empty());
+            snapshot.ifPresent(snapshots::add);
+            Instant refreshedAt = snapshot.map(FeedSnapshot::refreshedAt).orElse(null);
+            FeedStatus.State state = switch (FeedFreshness.of(refreshedAt, settings.refreshInterval(), clock.instant())) {
+                case FRESH -> FeedStatus.State.FRESH;
+                case STALE -> FeedStatus.State.STALE;
+                case MISSING -> FeedStatus.State.MISSING;
+            };
+            statuses.add(new FeedStatus(source, state, refreshedAt, snapshot.map(s -> s.entries().size()).orElse(0),
+                    cache.metadata(source).lastError(), notes.getOrDefault(source, "")));
+        }
+        return new ThreatFeedIndex(snapshots, statuses, settings.sharedHostingDomains());
     }
 
     // --- status -------------------------------------------------------------

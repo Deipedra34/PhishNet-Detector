@@ -4,6 +4,7 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * How threat feeds are downloaded and refreshed.
@@ -17,6 +18,7 @@ import java.util.Objects;
  * @param openPhishEnabled    whether the OpenPhish feed is used at all
  * @param openPhishUrl        where the OpenPhish feed is downloaded from
  * @param userAgent           User-Agent sent with every download
+ * @param sharedHostingDomains hosts that never produce a domain-level match (see {@link ThreatFeedIndex})
  * @param phishTankEnabled    whether the PhishTank feed is used (it still needs an API key)
  * @param phishTankApiKey     PhishTank application key, or {@code null}; without one PhishTank is skipped
  * @param phishTankUsername   PhishTank username, or {@code null}; sent as the {@code phishtank/<username>}
@@ -25,8 +27,8 @@ import java.util.Objects;
  */
 public record ThreatFeedSettings(Duration refreshInterval, Duration scanWait, Duration downloadTimeout,
                                  boolean openPhishEnabled, URI openPhishUrl, String userAgent,
-                                 boolean phishTankEnabled, String phishTankApiKey, String phishTankUsername,
-                                 String phishTankUrl) {
+                                 Set<String> sharedHostingDomains, boolean phishTankEnabled, String phishTankApiKey,
+                                 String phishTankUsername, String phishTankUrl) {
 
     public static final Duration DEFAULT_REFRESH_INTERVAL = Duration.ofHours(1);
     public static final Duration DEFAULT_SCAN_WAIT = Duration.ofSeconds(3);
@@ -48,6 +50,7 @@ public record ThreatFeedSettings(Duration refreshInterval, Duration scanWait, Du
         Objects.requireNonNull(openPhishUrl, "openPhishUrl");
         Objects.requireNonNull(userAgent, "userAgent");
         Objects.requireNonNull(phishTankUrl, "phishTankUrl");
+        sharedHostingDomains = Set.copyOf(sharedHostingDomains);
         phishTankApiKey = blankToNull(phishTankApiKey);
         phishTankUsername = blankToNull(phishTankUsername);
     }
@@ -55,7 +58,7 @@ public record ThreatFeedSettings(Duration refreshInterval, Duration scanWait, Du
     /** The built-in defaults: hourly refresh, a 3-second scan wait, OpenPhish on, PhishTank on but keyless. */
     public static ThreatFeedSettings defaults() {
         return new ThreatFeedSettings(DEFAULT_REFRESH_INTERVAL, DEFAULT_SCAN_WAIT, DEFAULT_DOWNLOAD_TIMEOUT,
-                true, DEFAULT_OPENPHISH_URL, DEFAULT_USER_AGENT, true, null, null, DEFAULT_PHISHTANK_URL);
+                true, DEFAULT_OPENPHISH_URL, DEFAULT_USER_AGENT, Set.of(), true, null, null, DEFAULT_PHISHTANK_URL);
     }
 
     /**
@@ -67,7 +70,7 @@ public record ThreatFeedSettings(Duration refreshInterval, Duration scanWait, Du
         String apiKey = blankToNull(environment.get(PHISHTANK_API_KEY_ENV));
         String username = blankToNull(environment.get(PHISHTANK_USERNAME_ENV));
         return new ThreatFeedSettings(refreshInterval, scanWait, downloadTimeout, openPhishEnabled, openPhishUrl,
-                userAgent, phishTankEnabled, apiKey != null ? apiKey : phishTankApiKey,
+                userAgent, sharedHostingDomains, phishTankEnabled, apiKey != null ? apiKey : phishTankApiKey,
                 username != null ? username : phishTankUsername, phishTankUrl);
     }
 
