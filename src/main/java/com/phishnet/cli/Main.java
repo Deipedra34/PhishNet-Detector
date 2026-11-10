@@ -72,6 +72,7 @@ import java.util.function.Function;
                 "  phishnet model info          (ML model details; see: phishnet model --help)",
                 "  phishnet monitor --help      (watch a mailbox for phishing as mail arrives)",
                 "  phishnet queue --help        (distributed scanning with Redis workers)",
+                "  phishnet feeds update        (refresh threat intelligence feeds; see: phishnet feeds --help)",
                 "",
                 "See the project README for the full option reference and sample output."
         }
@@ -297,6 +298,11 @@ public final class Main implements Callable<Integer> {
             return execute(QueueCommand.commandLine(out, err, whoisClient),
                     Arrays.copyOfRange(args, 1, args.length), out, err);
         }
+        // ...and for "feeds", which manages the cached threat intelligence feeds.
+        if (args.length > 0 && args[0].equals(FEEDS_COMMAND)) {
+            return execute(FeedsCommand.commandLine(out, err, threatFeeds),
+                    Arrays.copyOfRange(args, 1, args.length), out, err);
+        }
         // ...and for "monitor", which watches a mailbox instead of scanning given input.
         if (args.length > 0 && args[0].equals(MONITOR_COMMAND)) {
             String[] monitorArgs = Arrays.copyOfRange(args, 1, args.length);
@@ -327,6 +333,9 @@ public final class Main implements Callable<Integer> {
 
     /** First argument that switches to the Redis-based distributed scanning commands. */
     static final String QUEUE_COMMAND = "queue";
+
+    /** First argument that switches from a one-off scan to managing the threat intelligence feeds. */
+    static final String FEEDS_COMMAND = "feeds";
 
     /** First argument that switches from a one-off scan to watching a mailbox for new mail. */
     static final String MONITOR_COMMAND = "monitor";
