@@ -1,5 +1,7 @@
 package com.phishnet.util;
 
+import com.phishnet.feeds.FeedUrls;
+import com.phishnet.feeds.ThreatFeedSettings;
 import com.phishnet.model.PhishNetConfig;
 import com.phishnet.model.PhishNetConfig.ScoringConfig;
 import org.yaml.snakeyaml.Yaml;
@@ -7,12 +9,16 @@ import org.yaml.snakeyaml.Yaml;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Loads PhishNetConfig from YAML - a file path, a stream, or the bundled
@@ -96,7 +102,60 @@ public final class ConfigLoader {
                 typosquattingMaxDistance, longUrlThreshold, maxQueryParams, encodedCharThreshold,
                 domainAgeNewDays, domainAgeRecentDays);
 
-        return new PhishNetConfig(brands, suspiciousTlds, urlShorteners, urgencyKeywords, scoring);
+        ThreatFeedSettings threatFeeds = threatFeeds(mapValue(root.get("threatFeeds")), urlShorteners);
+
+        return new PhishNetConfig(brands, suspiciousTlds, urlShorteners, urgencyKeywords, scoring, threatFeeds);
+    }
+
+    /**
+     * The {@code threatFeeds} section; anything missing keeps its default. URL
+     * shorteners always count as shared hosts too: a listed bit.ly link says
+     * nothing about every other bit.ly link.
+     */
+    private static ThreatFeedSettings threatFeeds(Map<String, Object> section, List<String> urlShorteners) {
+        ThreatFeedSettings defaults = ThreatFeedSettings.defaults();
+        Map<String, Object> openPhish = mapValue(section.get("openPhish"));
+        Map<String, Object> phishTank = mapValue(section.get("phishTank"));
+
+        Set<String> sharedHosts = new LinkedHashSet<>();
+        List<String> configuredShared = new ArrayList<>(stringList(section.get("sharedHostingDomains")));
+        configuredShared.addAll(urlShorteners);
+        for (String host : configuredShared) {
+            String trimmed = host.strip();
+            // A leading dot means "and every subdomain", so keep it on the normalized host.
+            boolean wildcard = trimmed.startsWith(".");
+            FeedUrls.host(wildcard ? trimmed.substring(1) : trimmed)
+                    .ifPresent(normalized -> sharedHosts.add(wildcard ? "." + normalized : normalized));
+        }
+
+        return new ThreatFeedSettings(
+                Duration.ofMinutes(Math.max(0, intValue(section.get("refreshIntervalMinutes"),
+                        (int) defaults.refreshInterval().toMinutes()))),
+                Duration.ofSeconds(Math.max(0, intValue(section.get("scanWaitSeconds"),
+                        (int) defaults.scanWait().toSeconds()))),
+                Duration.ofSeconds(Math.max(1, intValue(section.get("downloadTimeoutSeconds"),
+                        (int) defaults.downloadTimeout().toSeconds()))),
+                booleanValue(openPhish.get("enabled"), defaults.openPhishEnabled()),
+                URI.create(stringValue(openPhish.get("url"), defaults.openPhishUrl().toString())),
+                defaults.userAgent(),
+                sharedHosts,
+                booleanValue(phishTank.get("enabled"), defaults.phishTankEnabled()),
+                stringValue(phishTank.get("apiKey"), null),
+                stringValue(phishTank.get("username"), null),
+                stringValue(phishTank.get("url"), defaults.phishTankUrl()));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> mapValue(Object raw) {
+        return raw instanceof Map ? (Map<String, Object>) raw : Map.of();
+    }
+
+    private static boolean booleanValue(Object raw, boolean fallback) {
+        return raw instanceof Boolean ? (Boolean) raw : fallback;
+    }
+
+    private static String stringValue(Object raw, String fallback) {
+        return raw == null ? fallback : String.valueOf(raw);
     }
 
     @SuppressWarnings("unchecked")

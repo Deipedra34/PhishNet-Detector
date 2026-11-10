@@ -198,6 +198,12 @@ scoring:
     domainAgeNew: 30          # younger than domainAgeNewDays
     domainAgeRecent: 15       # domainAgeNewDays to domainAgeRecentDays days old (inclusive)
     domainAgeEstablished: -5  # older than domainAgeRecentDays; negative = small score reduction
+    # Threat intelligence feeds (OpenPhish, PhishTank; see threatFeeds below and
+    # --no-threat-feeds). A listing is a report of a confirmed phishing page, not
+    # a heuristic guess, so these are the heaviest weights here: a listed URL
+    # crosses the HIGH threshold on its own.
+    knownPhishingUrl: 70      # this exact URL is listed
+    knownPhishingDomain: 40   # other URLs on the same host are listed
   mediumThreshold: 30
   highThreshold: 60
   typosquattingMaxDistance: 2
@@ -206,3 +212,58 @@ scoring:
   encodedCharThreshold: 5
   domainAgeNewDays: 30
   domainAgeRecentDays: 180
+
+# Threat intelligence feeds of known phishing URLs, checked on every scan unless
+# --no-threat-feeds is given. Feeds are cached under ~/.phishnet/feeds; manage
+# them with `phishnet feeds update` and `phishnet feeds status`.
+threatFeeds:
+  # A cached feed older than this is refreshed before (or while) scanning.
+  refreshIntervalMinutes: 60
+  # How long a scan waits for a stale/missing feed to download before going on
+  # with the cached copy (or without the feed). The download keeps going in the
+  # background either way, so a scan is never held up longer than this.
+  scanWaitSeconds: 3
+  # Time allowed for a download to start responding (`feeds update`, background refreshes).
+  downloadTimeoutSeconds: 60
+
+  # OpenPhish's free community feed: no account or API key needed.
+  openPhish:
+    enabled: true
+    url: https://openphish.com/feed.txt
+
+  # PhishTank needs an API key for automated downloads. Prefer setting it in the
+  # PHISHNET_PHISHTANK_API_KEY environment variable (and your PhishTank username
+  # in PHISHNET_PHISHTANK_USERNAME) over writing it here; the environment wins.
+  # Without a key, PhishTank is skipped and everything else works as usual.
+  phishTank:
+    enabled: true
+    # apiKey: your-application-key
+    # username: your-phishtank-username
+    url: https://data.phishtank.com/data/{apiKey}/online-valid.json.gz
+
+  # Hosts shared by many unrelated sites. A listed page on one of these only
+  # flags that exact URL, never the whole host (no knownPhishingDomain match).
+  # The urlShorteners above are included automatically. A leading dot also
+  # covers every subdomain.
+  sharedHostingDomains:
+    - 1drv.ms
+    - canva.com
+    - cloudflare-ipfs.com
+    - dl.dropboxusercontent.com
+    - docs.google.com
+    - drive.google.com
+    - dropbox.com
+    - dweb.link
+    - firebasestorage.googleapis.com
+    - form.jotform.com
+    - forms.gle
+    - forms.office.com
+    - github.com
+    - ipfs.io
+    - linktr.ee
+    - onedrive.live.com
+    - raw.githubusercontent.com
+    - sites.google.com
+    - storage.googleapis.com
+    - t.me
+    - telegra.ph

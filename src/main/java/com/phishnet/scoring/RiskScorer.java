@@ -9,6 +9,7 @@ import com.phishnet.model.SignalCategory;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Turns whatever signals the analyzers raised into a single 0-100 score and
@@ -23,6 +24,22 @@ public final class RiskScorer {
     public static final String DOMAIN_AGE_NEW = "domainAgeNew";
     public static final String DOMAIN_AGE_RECENT = "domainAgeRecent";
     public static final String DOMAIN_AGE_ESTABLISHED = "domainAgeEstablished";
+
+    /** The scanned URL itself is listed in a threat intelligence feed (OpenPhish, PhishTank). */
+    public static final String KNOWN_PHISHING_URL = "knownPhishingUrl";
+
+    /** Other URLs on the scanned URL's host are listed in a threat intelligence feed. */
+    public static final String KNOWN_PHISHING_DOMAIN = "knownPhishingDomain";
+
+    /**
+     * Weights used when a config doesn't mention a signal at all, for signals
+     * whose generic fallback (10) would badly misrepresent them. A threat feed
+     * listing is near-certain evidence, so a custom config written before the
+     * feeds existed still has to score it close to what the bundled config does.
+     */
+    private static final Map<String, Integer> FALLBACK_WEIGHTS = Map.of(
+            KNOWN_PHISHING_URL, 70,
+            KNOWN_PHISHING_DOMAIN, 40);
 
     private final PhishNetConfig config;
 
@@ -82,7 +99,7 @@ public final class RiskScorer {
 
         int total = adjustment;
         for (Signal signal : signals) {
-            total += scoring.weightOf(signal.id());
+            total += scoring.weightOf(signal.id(), FALLBACK_WEIGHTS.getOrDefault(signal.id(), 10));
         }
         int clamped = Math.max(0, Math.min(100, total));
 

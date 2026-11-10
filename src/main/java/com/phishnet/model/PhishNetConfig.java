@@ -1,12 +1,15 @@
 package com.phishnet.model;
 
+import com.phishnet.feeds.ThreatFeedSettings;
+
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
 /**
  * Everything that's tunable: brand list, suspicious TLDs, URL shorteners,
- * urgency keywords per language, and the scoring weights. Normally built by
+ * urgency keywords per language, the scoring weights, and the threat
+ * intelligence feed settings. Normally built by
  * ConfigLoader from YAML, but it's just a plain value object so tests can
  * construct one directly without touching the filesystem.
  */
@@ -17,14 +20,23 @@ public final class PhishNetConfig {
     private final List<String> urlShorteners;
     private final Map<String, List<String>> urgencyKeywords;
     private final ScoringConfig scoring;
+    private final ThreatFeedSettings threatFeeds;
 
+    /** A config with the default threat feed settings ({@link ThreatFeedSettings#defaults()}). */
     public PhishNetConfig(List<String> brands, List<String> suspiciousTlds, List<String> urlShorteners,
                            Map<String, List<String>> urgencyKeywords, ScoringConfig scoring) {
+        this(brands, suspiciousTlds, urlShorteners, urgencyKeywords, scoring, ThreatFeedSettings.defaults());
+    }
+
+    public PhishNetConfig(List<String> brands, List<String> suspiciousTlds, List<String> urlShorteners,
+                           Map<String, List<String>> urgencyKeywords, ScoringConfig scoring,
+                           ThreatFeedSettings threatFeeds) {
         this.brands = Collections.unmodifiableList(brands);
         this.suspiciousTlds = Collections.unmodifiableList(suspiciousTlds);
         this.urlShorteners = Collections.unmodifiableList(urlShorteners);
         this.urgencyKeywords = Collections.unmodifiableMap(urgencyKeywords);
         this.scoring = scoring;
+        this.threatFeeds = threatFeeds;
     }
 
     public List<String> brands() {
@@ -45,6 +57,11 @@ public final class PhishNetConfig {
 
     public ScoringConfig scoring() {
         return scoring;
+    }
+
+    /** How the OpenPhish/PhishTank feeds are downloaded, cached, and matched. */
+    public ThreatFeedSettings threatFeeds() {
+        return threatFeeds;
     }
 
     /** A reasonable, self-contained configuration used as a fallback and in tests. */
