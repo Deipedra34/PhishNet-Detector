@@ -32,6 +32,12 @@ phishing-like"). It's an extra signal only - the rule-based score stays the
 authoritative one - and `--no-ml` turns it off. See
 [Machine Learning Layer (experimental)](#machine-learning-layer-experimental).
 
+Every scanned URL is also checked against threat intelligence feeds of known,
+confirmed phishing pages (OpenPhish, and PhishTank with an API key), cached
+locally and refreshed hourly; a listed URL is flagged as a high-confidence
+signal on top of everything else. See
+[Threat Intelligence Feeds](#threat-intelligence-feeds).
+
 ## Contents
 
 - [What it detects](#what-it-detects)
@@ -41,6 +47,7 @@ authoritative one - and `--no-ml` turns it off. See
 - [Usage](#usage)
 - [Scan History](#scan-history)
 - [Machine Learning Layer (experimental)](#machine-learning-layer-experimental)
+- [Threat Intelligence Feeds](#threat-intelligence-feeds)
 - [REST API (serve mode)](#rest-api-serve-mode)
 - [Browser extension](#browser-extension)
 - [Real-Time Email Monitoring](#real-time-email-monitoring)
@@ -71,6 +78,12 @@ authoritative one - and `--no-ml` turns it off. See
   days), via a real-time WHOIS lookup of the URL's registrable domain -
   throwaway phishing domains are typically only days or weeks old
 - Well-established domains (over 180 days) get a small score reduction
+
+**Known phishing URLs** (`ThreatFeedService`, OpenPhish/PhishTank - disable with `--no-threat-feeds`)
+
+- URLs listed in the OpenPhish and (with an API key) PhishTank feeds of
+  confirmed phishing pages, and other pages on a listed host - see
+  [Threat Intelligence Feeds](#threat-intelligence-feeds)
 
 **TLS certificates** (`SslChecker`)
 
@@ -155,6 +168,12 @@ validates HTTP input, and `ScanService` calls the exact same `UrlAnalyzer` /
 `DomainAgeChecker` / `EmailAnalyzer` / `RiskScorer` sequence the CLI does,
 reusing `ReportFormatter`'s JSON structure for its responses.
 
+Threat intelligence feeds (`com.phishnet.feeds`) are another signal source:
+`ThreatFeedService` keeps a local cache of the OpenPhish/PhishTank feeds fresh,
+and its `ThreatFeedIndex` turns a feed match into a `knownPhishingUrl` or
+`knownPhishingDomain` signal that goes to `RiskScorer` alongside the analyzers'
+signals - see [Threat Intelligence Feeds](#threat-intelligence-feeds).
+
 The experimental ML layer (`com.phishnet.ml`) sits beside `RiskScorer`, not in
 front of it: `FeatureExtractor` reads a numeric feature vector off the
 `UrlAnalysisResult` and WHOIS result the pipeline already produced, and
@@ -184,6 +203,12 @@ anything older applies the `domainAgeEstablished` weight (`-5` by default)
 without listing it as a signal, since being old isn't a red flag. If the
 lookup fails, the age is `unknown` and contributes nothing either way.
 
+Threat feed matches arrive in step 1 as one more signal: `knownPhishingUrl`
+(70 points) when the URL itself is listed in OpenPhish or PhishTank, or
+`knownPhishingDomain` (40) when other URLs on its host are. They add to the
+other signals and the domain age like any other weight; a config that predates
+them still scores them at those defaults rather than the generic 10.
+
 Nothing about step 2-4 is hardcoded in Java - every weight and threshold
 comes from `phishnet-config.yaml` (or a `--config` override), so retuning the
 tool for a stricter or looser environment never requires a rebuild.
@@ -209,12 +234,13 @@ what you get by running it yourself:
 
 ```
 $ java -jar target/phishnet.jar --help
+
 Usage:
 phishnet [-hV] [--config=<path>] (--url=<url> | --email=<file.eml> |
          --batch=<file>) [[--json] [--no-color]] [-v | -q]
          [[--history-file=<path>] [--no-history] [--history-db=<path>]
-         [--no-history-db]] [[--html-report=<path>]] [[--no-whois]]
-         [[--threads=<n>]] [[--no-ml] [--model=<path>]]
+         [--no-history-db]] [[--html-report=<path>]] [[--no-whois]
+         [--no-threat-feeds]] [[--threads=<n>]] [[--no-ml] [--model=<path>]]
 
 Analyzes URLs, TLS certificates, and .eml email files for phishing indicators,
 and combines whatever it finds into a single 0-100 risk score with a
@@ -263,6 +289,10 @@ Network options:
       --no-whois             Skip the live WHOIS domain-age lookup (for
                                offline/fast scans or CI); domain age is then
                                left out of the score entirely
+      --no-threat-feeds      Don't check the OpenPhish/PhishTank threat
+                               intelligence feeds (no feed downloads, cached
+                               feeds unused); feed matches are then left out of
+                               the score
 
 Batch options:
       --threads=<n>          Scan --batch URLs on this many threads in parallel
@@ -287,6 +317,8 @@ Examples:
   phishnet model info          (ML model details; see: phishnet model --help)
   phishnet monitor --help      (watch a mailbox for phishing as mail arrives)
   phishnet queue --help        (distributed scanning with Redis workers)
+  phishnet feeds status        (threat intelligence feeds; see: phishnet feeds
+--help)
 
 See the project README for the full option reference and sample output.
 ```
@@ -358,6 +390,13 @@ java -jar target/phishnet.jar --batch urls.txt --threads 16
 
 # Leave out the experimental ML confidence line (see Machine Learning Layer below)
 java -jar target/phishnet.jar --url "https://example.com" --no-ml
+
+# Don't check the OpenPhish/PhishTank threat feeds (see Threat Intelligence Feeds below)
+java -jar target/phishnet.jar --url "https://example.com" --no-threat-feeds
+
+# Refresh the threat feed cache now, or show its state
+java -jar target/phishnet.jar feeds update
+java -jar target/phishnet.jar feeds status
 
 # Retrain the ML model, or show what the current one was trained on
 java -jar target/phishnet.jar model train
@@ -827,6 +866,192 @@ The simplest way to produce rows is to scan URLs with `--verbose` and copy the
   completes without the ML line; `phishnet model train` replaces it. If a
   freshly trained model can't be saved (e.g. a read-only home directory), it's
   still used for that run and trained again next time.
+
+## Threat Intelligence Feeds
+
+The analyzers above judge a URL by what it *looks like*. Threat intelligence
+feeds add what's actually *known* about it: lists of live phishing pages that
+people have already reported and confirmed. PhishNet checks every scanned URL
+against two of them:
+
+| Feed | Account needed | What's downloaded |
+| --- | --- | --- |
+| [OpenPhish](https://openphish.com) (community feed) | No | `https://openphish.com/feed.txt`, one URL per line |
+| [PhishTank](https://phishtank.org) | Yes, a free API key | `online-valid.json.gz`, the verified, currently-online phishes |
+
+OpenPhish works out of the box. PhishTank is optional: without an API key it's
+skipped (and says so in `--verbose` and `phishnet feeds status`), and everything
+else works exactly the same.
+
+### What a match adds to the score
+
+A feed match is an ordinary scoring signal, added to whatever the analyzers,
+WHOIS domain age, and the rest of the pipeline already found - it never
+replaces them, and the ML confidence line is unaffected:
+
+| Signal | Weight | Fires when |
+| --- | --- | --- |
+| `knownPhishingUrl` | 70 | The scanned URL itself is listed |
+| `knownPhishingDomain` | 40 | The URL isn't listed, but other URLs on the same host are |
+
+A listed URL crosses the HIGH threshold on its own. The weights live in
+`scoring.weights` like every other signal (see [Configuration](#configuration)).
+At most one feed signal is added per scan, labeled with every feed that lists it,
+so a URL in both feeds is `Known phishing URL (OpenPhish, PhishTank)` rather
+than counted twice. For an email, each embedded link is checked, again adding at
+most one feed signal for the whole message.
+
+```
+$ java -jar target/phishnet.jar --url https://secure-account-update.example/signin
+Target: https://secure-account-update.example/signin
+Risk Score: 70/100 (HIGH)
+Signals:
+  ✗ [knownPhishingUrl] Known phishing URL (OpenPhish)
+Recommendation: High risk of phishing. Do not click any links, enter credentials, or open attachments. Report and delete.
+```
+
+`--verbose` adds the matched entry and when that feed was last refreshed, plus a
+`Threat Feeds` block showing where each feed stands - so "not listed" can be told
+apart from "no feed data":
+
+```
+Signals:
+  ✗ [knownPhishingUrl] Known phishing URL (OpenPhish) (secure-account-update.example/signin listed in OpenPhish, feed refreshed 2026-11-10T19:58:38Z)
+...
+Threat Feeds:
+  OpenPhish: fresh, 3 entries, refreshed 2026-11-10T19:58:38Z
+  PhishTank: not configured: no API key configured (set PHISHNET_PHISHTANK_API_KEY or threatFeeds.phishTank.apiKey)
+```
+
+In `--quiet` mode a match shows up in the score and level (and so in the exit
+code), and in `--json` it's in the `signals` array like any other signal, as it
+is in scan history and the HTML report.
+
+Matching is a `HashSet` lookup on normalized URLs, so it costs the same however
+large the feeds are. Normalizing makes `HTTP://WWW.Evil.example:80/login/` and
+`https://evil.example/login` the same entry: scheme, `www.`, default ports,
+fragments, and a trailing slash are ignored, while path and query must match.
+Hosts shared by many unrelated sites (Google Sites, Dropbox, GitHub, IPFS
+gateways, URL shorteners, ...; the `threatFeeds.sharedHostingDomains` list) only
+ever match exact URLs, never `knownPhishingDomain`, since one phishing page there
+says nothing about the rest of the host.
+
+### Caching and refresh
+
+Feeds are cached under `~/.phishnet/feeds/` (one data file and one small
+metadata file per feed) and reused until they're older than the refresh
+interval, **1 hour** by default (`threatFeeds.refreshIntervalMinutes`). A feed
+in the cache is in one of three states:
+
+- **fresh** - within the refresh interval: used as-is, nothing is downloaded.
+- **stale** - older than that: a scan starts a refresh, and keeps using the
+  stale copy if the refresh fails or is slow.
+- **missing** - never downloaded successfully: a scan tries to download it,
+  and goes on without that feed if it can't.
+
+**A scan never fails or stalls because of a feed.** A stale or missing feed is
+downloaded in parallel with the others, and the scan waits for it for at most
+`threatFeeds.scanWaitSeconds` (3 by default). If it isn't done by then, or the
+download fails, the scan carries on with the last cached copy, or without that
+feed's signal if there's no cached copy yet. A slow download keeps going in
+the background and is saved for the next run. Cache files are replaced
+atomically, so an interrupted download can never corrupt the cache, and a
+download that comes back empty (an error page, a truncated response) is
+treated as a failure and never replaces a good cached copy.
+
+A `--batch` run loads the feeds once for the whole batch, not per URL.
+
+### `phishnet feeds` commands
+
+```bash
+# Download every enabled feed now, however fresh the cache is
+java -jar target/phishnet.jar feeds update
+
+# Show each feed's state, last refresh, and entry count (reads the cache only; never downloads)
+java -jar target/phishnet.jar feeds status
+```
+
+```
+$ java -jar target/phishnet.jar feeds update
+Updating threat feeds in /home/alice/.phishnet/feeds ...
+  OpenPhish:  updated, 312 entries
+  PhishTank:  skipped (no API key configured (set PHISHNET_PHISHTANK_API_KEY or threatFeeds.phishTank.apiKey))
+
+$ java -jar target/phishnet.jar feeds status
+Cache directory:  /home/alice/.phishnet/feeds
+Refresh interval: 1 hour
+
+OpenPhish
+  Status:       fresh (cached and available to scans)
+  Last refresh: 2026-11-10T19:58:38Z (3 minutes ago)
+  Entries:      312
+
+PhishTank
+  Status:       not configured: no API key configured (set PHISHNET_PHISHTANK_API_KEY or threatFeeds.phishTank.apiKey)
+```
+
+`feeds update` exits `1` if any feed failed to download (a failed feed keeps its
+previous cached copy); skipped feeds don't count as failures. Both commands
+take `--config <path>` to read the `threatFeeds` settings from your own config.
+Running `feeds update` from a cron job or scheduled task keeps the cache warm,
+so scans never have to wait on a download at all.
+
+### Turning it off
+
+`--no-threat-feeds` skips the feeds entirely for one scan: nothing is
+downloaded, the cache isn't read, and no feed signal is added - the score is
+exactly what it would be without this feature. Like `--no-whois`, `--no-ml`,
+and `--no-history-db`, it only affects that one run:
+
+```bash
+java -jar target/phishnet.jar --url "https://example.com" --no-threat-feeds
+```
+
+To switch a feed off permanently, set `threatFeeds.openPhish.enabled` or
+`threatFeeds.phishTank.enabled` to `false` in your config.
+
+The feeds are used by the `--url`, `--email`, and `--batch` scans. The REST API
+(`serve`), `queue worker`, and `monitor` modes don't consult them, so their
+results are unchanged.
+
+### Setting up PhishTank
+
+PhishTank requires an application key for automated downloads.
+
+1. Create a free account at [phishtank.org](https://phishtank.org) and register
+   an application to get its API key.
+2. Give PhishNet the key, and your PhishTank username, which is sent as the
+   `phishtank/<username>` User-Agent PhishTank asks API clients to use. The
+   environment is the recommended place, since it keeps the key out of files:
+
+   ```bash
+   export PHISHNET_PHISHTANK_API_KEY=your-application-key
+   export PHISHNET_PHISHTANK_USERNAME=your-phishtank-username
+   java -jar target/phishnet.jar feeds update
+   ```
+
+   Or put them in your config (the environment variables win if both are set):
+
+   ```yaml
+   threatFeeds:
+     phishTank:
+       apiKey: your-application-key
+       username: your-phishtank-username
+   ```
+
+3. Check it with `phishnet feeds status`: PhishTank should go from
+   `not configured` to `fresh` after the next `feeds update` or scan.
+
+PhishTank's full database is tens of megabytes, so its first download can take
+longer than a scan waits; a scan just carries on without it while it finishes in
+the background, and `feeds update` waits for it (up to
+`threatFeeds.downloadTimeoutSeconds`). PhishTank rate-limits downloads, which the
+default 1-hour refresh interval stays well within.
+
+In a container, the feed cache lives in `/home/phishnet/.phishnet/feeds`, so the
+same named volume that keeps [scan history](#scan-history-in-a-container) keeps
+the feed cache too; without one, each container downloads the feeds on its first
+scan. Pass the PhishTank key with `-e PHISHNET_PHISHTANK_API_KEY=...`.
 
 ## REST API (serve mode)
 
@@ -1560,6 +1785,8 @@ scoring:
     domainAgeNew: 30          # WHOIS age < domainAgeNewDays
     domainAgeRecent: 15       # domainAgeNewDays <= age <= domainAgeRecentDays
     domainAgeEstablished: -5  # older; negative = small score reduction (0 to disable)
+    knownPhishingUrl: 70      # URL listed in a threat feed
+    knownPhishingDomain: 40   # other URLs on the same host listed
   mediumThreshold: 30      # score >= this is MEDIUM
   highThreshold: 60        # score >= this is HIGH
   typosquattingMaxDistance: 2
@@ -1568,6 +1795,19 @@ scoring:
   encodedCharThreshold: 5
   domainAgeNewDays: 30
   domainAgeRecentDays: 180
+threatFeeds:                     # see Threat Intelligence Feeds
+  refreshIntervalMinutes: 60     # cached feeds older than this are refreshed
+  scanWaitSeconds: 3             # longest a scan waits on a feed download
+  downloadTimeoutSeconds: 60
+  openPhish:
+    enabled: true
+    url: https://openphish.com/feed.txt
+  phishTank:
+    enabled: true                # still skipped until an API key is set
+    # apiKey: ...                # prefer PHISHNET_PHISHTANK_API_KEY
+    # username: ...              # prefer PHISHNET_PHISHTANK_USERNAME
+    url: https://data.phishtank.com/data/{apiKey}/online-valid.json.gz
+  sharedHostingDomains: [sites.google.com, dropbox.com, ...]  # exact-URL matches only
 ```
 
 The bundled config ships with **71 brands** (banking/finance, tech/email,
@@ -1628,6 +1868,20 @@ settings never contain the password; `MonitorCommandTest` drives
 `phishnet monitor` end to end, including password handling and history output.
 The IMAP and POP3 connection classes themselves need a real server and aren't
 exercised by the suite.
+Threat intelligence feeds are tested without the network: `FeedParserTest` and
+`FeedUrlsTest` cover OpenPhish and PhishTank parsing (comments, duplicates,
+malformed and truncated input, HTML error pages) and URL normalization;
+`FeedCacheTest` covers fresh/stale/missing classification and the on-disk cache
+(round trips, failures keeping the old copy, corrupt metadata, atomic writes);
+`ThreatFeedServiceTest` drives refreshes and scan-time loading through a fake
+fetcher and a fixed clock, including a download that never finishes in time, a
+failed refresh falling back to the stale copy, and PhishTank being skipped
+without a key; `ThreatFeedScoringTest` checks the weights and that feed signals
+add to the heuristic, domain-age, and batch scores; and `ThreatFeedCliTest`
+drives scans, `--no-threat-feeds`, and `phishnet feeds update/status` end to end
+against a temporary cache directory. `HttpFeedFetcherTest` checks the real HTTP
+client (gzip, headers, error statuses) against an in-process server on the
+loopback interface.
 Parallel and distributed scanning: `ParallelScannerTest` checks that every job
 runs exactly once, that results come back in input order while progress counts
 completions, and that jobs really overlap; `ConcurrentHistoryTest` has eight
@@ -1658,7 +1912,7 @@ or empty sections (brands, TLDs, weights).
 `mvn test` runs [JaCoCo](https://www.jacoco.org/jacoco/) automatically and
 generates an HTML report at `target/site/jacoco/index.html` - open that file
 in a browser for a line-by-line, package-by-package breakdown. The suite
-(556 tests as of this writing) maintains roughly **90% line / 80% branch**
+(666 tests as of this writing) maintains roughly **90% line / 80% branch**
 coverage overall; the biggest remaining gaps are `SslChecker`'s real-socket
 TLS handshake path and `SocketWhoisClient`'s port-43 I/O, which by design
 aren't exercised without a live network connection (the certificate-decision
@@ -1680,11 +1934,12 @@ src/main/java/com/phishnet/
   analyzer/   UrlAnalyzer, SslChecker, EmailAnalyzer, DomainAgeChecker, WhoisClient, SocketWhoisClient
   model/      Signal, RiskScore, UrlComponents, PhishNetConfig, ...
   scoring/    RiskScorer
-  cli/        Main (picocli @Command), ServeCommand, HistoryCommand, ModelCommand, MonitorCommand, QueueCommand, ReportFormatter, Reporter, HistoryReporter, MonitorReporter, QueueWorkerReporter, OutputLevel, HistoryWriter, HtmlReportWriter
+  cli/        Main (picocli @Command), ServeCommand, HistoryCommand, ModelCommand, MonitorCommand, QueueCommand, FeedsCommand, ReportFormatter, Reporter, HistoryReporter, MonitorReporter, QueueWorkerReporter, OutputLevel, HistoryWriter, HtmlReportWriter
   history/    HistoryDatabase (SQLite scan history), HistoryEntry, HistoryFilter, HistoryStats
   batch/      ParallelScanner (thread pool + bounded job queue), UrlScanner (shared URL scan pipeline)
   queue/      QueueWorker, JobQueue, RedisJobQueue, RedisSettings, ScanJob (Redis-based distributed mode)
   ml/         FeatureVector, FeatureExtractor, LogisticRegression, TrainingData, MlModel, MlScorer, MlPrediction (experimental ML layer)
+  feeds/      ThreatFeedService, ThreatFeedIndex, FeedCache, FeedParser, FeedUrls, HttpFeedFetcher, ThreatFeedSettings (threat intelligence feeds)
   mail/       MailMonitorService, MailSource, ImapMailSource, Pop3MailSource, MessageConverter, MonitorActions, Backoff, MailServerSettings (mailbox monitoring)
   api/        ApiServer (Javalin routes, validation, JSON errors), ScanService (analyzer/scorer wrapper)
   util/       LevenshteinDistance, HomoglyphUtil, ConfigLoader, AnsiColor, ColorSupport
