@@ -7,7 +7,8 @@ package com.phishnet.feeds;
  * directory.
  */
 public enum FeedSource {
-    OPENPHISH("openphish", "OpenPhish");
+    OPENPHISH("openphish", "OpenPhish"),
+    PHISHTANK("phishtank", "PhishTank");
 
     private final String id;
     private final String displayName;

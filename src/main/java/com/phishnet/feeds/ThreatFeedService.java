@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -22,6 +23,9 @@ import java.util.Optional;
  * back to its last good (if stale) copy instead of losing it. {@link #status()}
  * classifies each cached copy as fresh, stale, or missing against the
  * configured refresh interval.
+ *
+ * PhishTank needs an API key: without one ({@link ThreatFeedSettings#phishTankApiKey()})
+ * it's reported as not configured and skipped, and everything else carries on.
  *
  * The network sits behind {@link FeedFetcher} and time behind {@link Clock},
  * so tests drive this with canned feeds and a fixed clock.
@@ -84,11 +88,16 @@ public final class ThreatFeedService {
     public boolean isEnabled(FeedSource source) {
         return switch (source) {
             case OPENPHISH -> settings.openPhishEnabled();
+            case PHISHTANK -> settings.phishTankEnabled();
         };
     }
 
     /** Why {@code source} can't be downloaded yet even though it's enabled, if anything. */
     public Optional<String> missingConfiguration(FeedSource source) {
+        if (source == FeedSource.PHISHTANK && settings.phishTankApiKey() == null) {
+            return Optional.of("no API key configured (set " + ThreatFeedSettings.PHISHTANK_API_KEY_ENV
+                    + " or threatFeeds.phishTank.apiKey)");
+        }
         return Optional.empty();
     }
 
@@ -139,16 +148,24 @@ public final class ThreatFeedService {
     URI downloadUri(FeedSource source) {
         return switch (source) {
             case OPENPHISH -> settings.openPhishUrl();
+            case PHISHTANK -> URI.create(settings.phishTankUrl().replace("{apiKey}",
+                    URLEncoder.encode(settings.phishTankApiKey() == null ? "" : settings.phishTankApiKey(),
+                            StandardCharsets.UTF_8)));
         };
     }
 
     Map<String, String> headers(FeedSource source) {
+        // PhishTank asks every client to identify itself as "phishtank/<username>".
+        if (source == FeedSource.PHISHTANK && settings.phishTankUsername() != null) {
+            return Map.of("User-Agent", "phishtank/" + settings.phishTankUsername());
+        }
         return Map.of("User-Agent", settings.userAgent());
     }
 
     private static FeedEntries parse(FeedSource source, InputStream in) throws IOException {
         return switch (source) {
             case OPENPHISH -> FeedParser.parseOpenPhish(new InputStreamReader(in, StandardCharsets.UTF_8));
+            case PHISHTANK -> FeedParser.parsePhishTank(in);
         };
     }
 
