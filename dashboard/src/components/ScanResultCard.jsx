@@ -28,6 +28,7 @@ export default function ScanResultCard({ result }) {
       )}
 
       {result.domainAge ? <DomainAge domainAge={result.domainAge} /> : null}
+      {result.email ? <EmailDetails email={result.email} /> : null}
     </article>
   );
 }
@@ -48,6 +49,44 @@ function DomainAge({ domainAge }) {
     <>
       <h3>Domain age</h3>
       <p>{text}</p>
+    </>
+  );
+}
+
+function EmailDetails({ email }) {
+  const links = email.links ?? [];
+  return (
+    <>
+      <h3>Email</h3>
+      <dl className="details">
+        <dt>From</dt>
+        <dd>
+          {email.displayName ? `${email.displayName} ` : ""}
+          {email.from ? `<${email.from}>` : "(none)"}
+        </dd>
+        {email.replyTo ? (
+          <>
+            <dt>Reply-To</dt>
+            <dd>{email.replyTo}</dd>
+          </>
+        ) : null}
+        <dt>Subject</dt>
+        <dd>{email.subject || "(none)"}</dd>
+        <dt>Links</dt>
+        <dd>
+          {links.length === 0 ? (
+            "None"
+          ) : (
+            <ul>
+              {links.map((link, index) => (
+                <li key={index}>
+                  <code>{link}</code>
+                </li>
+              ))}
+            </ul>
+          )}
+        </dd>
+      </dl>
     </>
   );
 }
