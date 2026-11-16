@@ -96,9 +96,13 @@ final class ServeCommand implements Callable<Integer> {
 
         // null = --no-whois / --no-history-db, same convention as the CLI scan modes.
         // The database is only created on the first recorded scan.
-        HistoryDatabase history = noHistoryDb ? null : new HistoryDatabase(
-                databaseFile != null ? Path.of(databaseFile) : HistoryDatabase.defaultPath(), true, err);
-        ApiServer server = new ApiServer(new ScanService(config, noWhois ? null : whoisClient, history), err);
+        Path historyFile = databaseFile != null ? Path.of(databaseFile) : HistoryDatabase.defaultPath();
+        HistoryDatabase history = noHistoryDb ? null : new HistoryDatabase(historyFile, true, err);
+        // The dashboard's history endpoints only read, like `phishnet history`, so they work
+        // even with --no-history-db (which only stops this server from recording scans).
+        HistoryDatabase historyReader = new HistoryDatabase(historyFile, false, err);
+        ApiServer server = new ApiServer(new ScanService(config, noWhois ? null : whoisClient, history), err)
+                .withHistory(historyReader);
         try {
             server.start(port);
         } catch (RuntimeException e) {
@@ -111,6 +115,7 @@ final class ServeCommand implements Callable<Integer> {
         out.println("  GET  /api/health");
         out.println("  POST /api/scan/url");
         out.println("  POST /api/scan/email");
+        out.println("  GET  /api/history");
         if (history != null) {
             out.println("Recording scans to " + history.file());
         }

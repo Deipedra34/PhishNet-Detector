@@ -3,6 +3,7 @@ package com.phishnet.api;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.phishnet.history.HistoryDatabase;
 import io.javalin.Javalin;
 import io.javalin.config.JavalinConfig;
 import io.javalin.config.SizeUnit;
@@ -18,6 +19,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.sql.SQLException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -32,6 +34,7 @@ import java.util.regex.Pattern;
  *   <li>{@code POST /api/scan/url}   - JSON {@code {"url":"..."}}</li>
  *   <li>{@code POST /api/scan/email} - multipart upload (form field {@value #EMAIL_UPLOAD_FIELD}),
  *       or JSON {@code {"raw":"<full .eml text>"}}</li>
+ *   <li>{@code GET  /api/history}    - recent scans from the SQLite scan history (read-only)</li>
  * </ul>
  *
  * Every error - bad input, unknown route, oversized body, or an unexpected
@@ -70,7 +73,10 @@ public final class ApiServer {
     private final long maxRequestBytes;
     private final String tooLargeMessage;
     private final ObjectMapper mapper = new ObjectMapper();
-    private final Javalin app;
+    /** Created by {@link #start}, once the optional read-side components below are set. */
+    private Javalin app;
+    /** Read-only history endpoints, or {@code null} when no history database was given. */
+    private HistoryApi historyApi;
 
     /**
      * @param log where unexpected (500) errors are reported, with their stack trace
@@ -85,17 +91,38 @@ public final class ApiServer {
         this.log = log;
         this.maxRequestBytes = maxRequestBytes;
         this.tooLargeMessage = "Request body too large (max " + describeSize(maxRequestBytes) + ")";
-        this.app = Javalin.create(this::configure);
+    }
+
+    /**
+     * Serves the read-only scan history endpoints ({@code GET /api/history...}) from
+     * {@code database}. Only reads are made through it, so a database with writes
+     * disabled is fine. Must be called before {@link #start}; without it those
+     * endpoints answer 503.
+     */
+    public ApiServer withHistory(HistoryDatabase database) {
+        requireNotStarted();
+        this.historyApi = database == null ? null : new HistoryApi(database);
+        return this;
     }
 
     /** Starts listening; port 0 picks a free port (see {@link #port()}). Returns once the server is up. */
     public ApiServer start(int port) {
+        requireNotStarted();
+        app = Javalin.create(this::configure);
         app.start(port);
         return this;
     }
 
     public void stop() {
-        app.stop();
+        if (app != null) {
+            app.stop();
+        }
+    }
+
+    private void requireNotStarted() {
+        if (app != null) {
+            throw new IllegalStateException("The API server has already been started");
+        }
     }
 
     /** The port actually being listened on. */
@@ -129,8 +156,9 @@ public final class ApiServer {
         config.routes.get("/api/health", ctx -> respond(ctx, HttpStatus.OK, Map.of("status", "ok")));
         config.routes.post("/api/scan/url", this::scanUrl);
         config.routes.post("/api/scan/email", this::scanEmail);
+        config.routes.get("/api/history", ctx -> respond(ctx, HttpStatus.OK, history().list()));
         // Per endpoint rather than "/api/*", so an unknown path still answers 404, not 405.
-        for (String path : List.of("/api/health", "/api/scan/url", "/api/scan/email")) {
+        for (String path : List.of("/api/health", "/api/scan/url", "/api/scan/email", "/api/history")) {
             config.routes.options(path, this::preflight);
         }
 
@@ -140,6 +168,11 @@ public final class ApiServer {
             // Javalin's own body-limit 413 just says "Content Too Large"; say what the limit is.
             String message = status == HttpStatus.CONTENT_TOO_LARGE ? tooLargeMessage : e.getMessage();
             respondError(ctx, status, message);
+        });
+        config.routes.exception(SQLException.class, (e, ctx) -> {
+            log.println("Error: could not read the scan history database for " + ctx.method() + " " + ctx.path()
+                    + ": " + e.getMessage());
+            respondError(ctx, HttpStatus.INTERNAL_SERVER_ERROR, "Could not read the scan history database");
         });
         config.routes.exception(Exception.class, (e, ctx) -> {
             log.println("Error: unexpected failure handling " + ctx.method() + " " + ctx.path());
@@ -171,6 +204,14 @@ public final class ApiServer {
         String raw = requiredText(readJsonObject(ctx), "raw");
         respond(ctx, HttpStatus.OK,
                 scanner.scanEmail("raw email", new ByteArrayInputStream(raw.getBytes(StandardCharsets.UTF_8))));
+    }
+
+    private HistoryApi history() {
+        if (historyApi == null) {
+            throw new HttpResponseException(HttpStatus.SERVICE_UNAVAILABLE.getCode(),
+                    "Scan history is not available on this server");
+        }
+        return historyApi;
     }
 
     // --- CORS (browser extensions only) -------------------------------------------
