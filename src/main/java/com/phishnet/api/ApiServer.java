@@ -14,12 +14,15 @@ import io.javalin.http.Context;
 import io.javalin.http.HttpResponseException;
 import io.javalin.http.HttpStatus;
 import io.javalin.http.UploadedFile;
+import io.javalin.http.staticfiles.Location;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.sql.SQLException;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -68,6 +71,13 @@ public final class ApiServer {
      */
     private static final Pattern EXTENSION_ORIGIN = Pattern.compile("(chrome|moz)-extension://[A-Za-z0-9-]+");
 
+    /** Every endpoint path, for CORS preflights and the dashboard's 404/405 fallback. */
+    static final List<String> API_PATHS = List.of("/api/health", "/api/scan/url", "/api/scan/email",
+            "/api/history", "/api/history/stats", "/api/feeds/status");
+
+    /** The dashboard's entry page, served for every client-side route. */
+    static final String DASHBOARD_INDEX = "index.html";
+
     /** How long a browser may cache a preflight answer, in seconds. */
     static final String CORS_MAX_AGE_SECONDS = "600";
 
@@ -82,6 +92,8 @@ public final class ApiServer {
     private HistoryApi historyApi;
     /** Threat feed status endpoint, or {@code null} when no feed service was given. */
     private FeedsApi feedsApi;
+    /** Built web dashboard to serve at "/", or {@code null} to serve the API only. */
+    private Path dashboardDirectory;
 
     /**
      * @param log where unexpected (500) errors are reported, with their stack trace
@@ -118,6 +130,29 @@ public final class ApiServer {
         requireNotStarted();
         this.feedsApi = service == null ? null : new FeedsApi(service);
         return this;
+    }
+
+    /**
+     * Also serves the built web dashboard (the output of {@code npm run build} in
+     * {@code dashboard/}) from {@code directory} at "/", on the same port as the API.
+     * Paths that aren't a file and don't start with {@code /api/} get its
+     * {@code index.html}, so the dashboard's client-side routes ({@code /history}, ...)
+     * survive a reload. Must be called before {@link #start}.
+     *
+     * @throws IllegalArgumentException if {@code directory} has no {@code index.html}
+     */
+    public ApiServer withDashboard(Path directory) {
+        requireNotStarted();
+        if (directory != null && !isDashboardDirectory(directory)) {
+            throw new IllegalArgumentException("No " + DASHBOARD_INDEX + " in " + directory);
+        }
+        this.dashboardDirectory = directory == null ? null : directory.toAbsolutePath().normalize();
+        return this;
+    }
+
+    /** Whether {@code directory} looks like a built dashboard (it has an index.html). */
+    public static boolean isDashboardDirectory(Path directory) {
+        return directory != null && Files.isRegularFile(directory.resolve(DASHBOARD_INDEX));
     }
 
     /** Starts listening; port 0 picks a free port (see {@link #port()}). Returns once the server is up. */
@@ -175,9 +210,12 @@ public final class ApiServer {
         config.routes.get("/api/history/stats", ctx -> respond(ctx, HttpStatus.OK, history().stats(ctx)));
         config.routes.get("/api/feeds/status", ctx -> respond(ctx, HttpStatus.OK, feeds().status()));
         // Per endpoint rather than "/api/*", so an unknown path still answers 404, not 405.
-        for (String path : List.of("/api/health", "/api/scan/url", "/api/scan/email", "/api/history",
-                "/api/history/stats", "/api/feeds/status")) {
+        for (String path : API_PATHS) {
             config.routes.options(path, this::preflight);
+        }
+
+        if (dashboardDirectory != null) {
+            configureDashboard(config, dashboardDirectory);
         }
 
         // Overrides Javalin's built-in handler, so its own 404/405/413 responses use our JSON error shape too.
@@ -196,6 +234,34 @@ public final class ApiServer {
             log.println("Error: unexpected failure handling " + ctx.method() + " " + ctx.path());
             e.printStackTrace(log);
             respondError(ctx, HttpStatus.INTERNAL_SERVER_ERROR, "Internal server error");
+        });
+    }
+
+    /** Static files from the built dashboard, with index.html for client-side routes. */
+    private static void configureDashboard(JavalinConfig config, Path directory) {
+        config.staticFiles.add(files -> {
+            files.hostedPath = "/";
+            files.directory = directory.toString();
+            files.location = Location.EXTERNAL;
+        });
+        Path index = directory.resolve(DASHBOARD_INDEX);
+        config.spaRoot.addHandler("/", ctx -> {
+            String path = ctx.path();
+            // The fallback is reached before Javalin's own 404/405 handling, so give API
+            // paths the answers they'd get without a dashboard: 405 for a known endpoint
+            // called with the wrong method, otherwise a JSON 404.
+            boolean apiPath = path.equals("/api") || path.startsWith("/api/");
+            if (apiPath && API_PATHS.contains(path)) {
+                throw new HttpResponseException(HttpStatus.METHOD_NOT_ALLOWED.getCode(),
+                        HttpStatus.METHOD_NOT_ALLOWED.getMessage());
+            }
+            // A missing file (e.g. an old hashed asset) is a 404 too, not the app's HTML.
+            if (apiPath || path.substring(path.lastIndexOf('/') + 1).contains(".")) {
+                throw new HttpResponseException(HttpStatus.NOT_FOUND.getCode(),
+                        "Endpoint " + ctx.method() + " " + path + " not found");
+            }
+            ctx.header("Cache-Control", "no-cache");
+            ctx.contentType(ContentType.TEXT_HTML).result(Files.newInputStream(index));
         });
     }
 

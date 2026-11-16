@@ -16,6 +16,8 @@ import picocli.CommandLine.Spec;
 
 import java.io.PrintStream;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.function.Function;
 
@@ -34,14 +36,16 @@ import java.util.function.Function;
         versionProvider = Main.VersionProvider.class,
         sortOptions = false,
         description = "Start an HTTP server exposing the scanner as a JSON REST API "
-                + "(POST /api/scan/url, POST /api/scan/email, GET /api/health).",
+                + "(POST /api/scan/url, POST /api/scan/email, GET /api/health), plus read-only history and "
+                + "feed status endpoints and, when it has been built, the web dashboard on the same port.",
         synopsisHeading = "%nUsage:%n",
         descriptionHeading = "%n",
         optionListHeading = "%nOptions:%n",
         footerHeading = "%nExamples:%n",
         footer = {
                 "  phishnet serve",
-                "  phishnet serve --port 9090 --no-whois"
+                "  phishnet serve --port 9090 --no-whois",
+                "  phishnet serve --dashboard dashboard/dist"
         }
 )
 final class ServeCommand implements Callable<Integer> {
@@ -69,6 +73,19 @@ final class ServeCommand implements Callable<Integer> {
     @Option(names = "--no-history-db",
             description = "Do not record API scans in the scan history database")
     private boolean noHistoryDb;
+
+    @Option(names = "--dashboard", paramLabel = "<dir>",
+            description = "Serve the built web dashboard from this directory (default: $"
+                    + DASHBOARD_DIR_ENV + ", else ./dashboard/dist, else a dashboard/ folder next to the jar - "
+                    + "the first that contains an index.html)")
+    private String dashboardDir;
+
+    @Option(names = "--no-dashboard",
+            description = "Serve the REST API only, without the web dashboard")
+    private boolean noDashboard;
+
+    /** Environment variable naming the built dashboard directory (set in the Docker image). */
+    static final String DASHBOARD_DIR_ENV = "PHISHNET_DASHBOARD_DIR";
 
     private final PrintStream out;
     private final PrintStream err;
@@ -104,6 +121,20 @@ final class ServeCommand implements Callable<Integer> {
             return 1;
         }
 
+        Path dashboard = null;
+        if (!noDashboard) {
+            if (dashboardDir != null) {
+                dashboard = Path.of(dashboardDir);
+                if (!ApiServer.isDashboardDirectory(dashboard)) {
+                    err.println("Error: --dashboard " + dashboardDir + " has no index.html "
+                            + "(build the dashboard with: cd dashboard && npm install && npm run build)");
+                    return 1;
+                }
+            } else {
+                dashboard = findDashboard(System.getenv(DASHBOARD_DIR_ENV), Path.of(""), jarDirectory());
+            }
+        }
+
         // null = --no-whois / --no-history-db, same convention as the CLI scan modes.
         // The database is only created on the first recorded scan.
         Path historyFile = databaseFile != null ? Path.of(databaseFile) : HistoryDatabase.defaultPath();
@@ -113,7 +144,8 @@ final class ServeCommand implements Callable<Integer> {
         HistoryDatabase historyReader = new HistoryDatabase(historyFile, false, err);
         ApiServer server = new ApiServer(new ScanService(config, noWhois ? null : whoisClient, history), err)
                 .withHistory(historyReader)
-                .withFeeds(threatFeeds.apply(config.threatFeeds().withEnvironment(System.getenv())));
+                .withFeeds(threatFeeds.apply(config.threatFeeds().withEnvironment(System.getenv())))
+                .withDashboard(dashboard);
         try {
             server.start(port);
         } catch (RuntimeException e) {
@@ -132,6 +164,46 @@ final class ServeCommand implements Callable<Integer> {
         if (history != null) {
             out.println("Recording scans to " + history.file());
         }
+        if (dashboard != null) {
+            out.println("Web dashboard: http://localhost:" + server.port() + "/ (from " + dashboard.toAbsolutePath()
+                    + ")");
+        } else if (!noDashboard) {
+            out.println("Web dashboard: not found, serving the API only "
+                    + "(build it with: cd dashboard && npm install && npm run build)");
+        }
         return 0;
+    }
+
+    /**
+     * The built dashboard to serve when {@code --dashboard} isn't given: the first of
+     * {@code envValue} ({@value #DASHBOARD_DIR_ENV}), {@code workingDir/dashboard/dist}
+     * (a source checkout), and {@code jarDir/dashboard} (an unpacked release) that
+     * contains an index.html; {@code null} if none does.
+     */
+    static Path findDashboard(String envValue, Path workingDir, Path jarDir) {
+        List<Path> candidates = new ArrayList<>();
+        if (envValue != null && !envValue.isBlank()) {
+            candidates.add(Path.of(envValue.trim()));
+        }
+        candidates.add(workingDir.resolve("dashboard").resolve("dist"));
+        if (jarDir != null) {
+            candidates.add(jarDir.resolve("dashboard"));
+        }
+        for (Path candidate : candidates) {
+            if (ApiServer.isDashboardDirectory(candidate)) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    /** The directory holding the running jar, or {@code null} when not run from a jar (IDE, tests). */
+    private static Path jarDirectory() {
+        try {
+            Path location = Path.of(ServeCommand.class.getProtectionDomain().getCodeSource().getLocation().toURI());
+            return location.toString().endsWith(".jar") ? location.toAbsolutePath().getParent() : null;
+        } catch (Exception e) {
+            return null;
+        }
     }
 }
