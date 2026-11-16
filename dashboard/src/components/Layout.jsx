@@ -1,4 +1,5 @@
 import { NavLink, Outlet } from "react-router-dom";
+import ApiSettings from "./ApiSettings.jsx";
 
 const NAV_ITEMS = [
   { to: "/", label: "Scan", end: true },
@@ -25,6 +26,9 @@ export default function Layout() {
       <main className="app-main">
         <Outlet />
       </main>
+      <footer className="app-footer">
+        <ApiSettings />
+      </footer>
     </div>
   );
 }
