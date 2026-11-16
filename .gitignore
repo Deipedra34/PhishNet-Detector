@@ -30,3 +30,8 @@ phishnet-history.csv
 
 # Env / secrets
 .env
+
+# Web dashboard (dashboard/): dependencies and build output
+dashboard/node_modules/
+dashboard/dist/
+dashboard/coverage/

@@ -1,0 +1,35 @@
+:root {
+  --bg: #0b0e17;
+  --text: #f2f4f8;
+  --muted: #8b93a7;
+  --accent: #fb7185;
+  font-family: "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.app-header {
+  padding: 16px 24px;
+}
+
+.brand {
+  font-weight: 800;
+  font-size: 20px;
+}
+
+.brand-accent {
+  color: var(--accent);
+}
+
+.app-main {
+  padding: 0 24px 24px;
+}
