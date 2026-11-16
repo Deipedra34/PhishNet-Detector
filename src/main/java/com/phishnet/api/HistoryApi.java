@@ -4,6 +4,7 @@ import com.phishnet.cli.HistoryWriter.TargetType;
 import com.phishnet.history.HistoryDatabase;
 import com.phishnet.history.HistoryEntry;
 import com.phishnet.history.HistoryFilter;
+import com.phishnet.history.HistoryStats;
 import com.phishnet.model.RiskLevel;
 import io.javalin.http.BadRequestResponse;
 import io.javalin.http.Context;
@@ -25,6 +26,9 @@ final class HistoryApi {
     static final int DEFAULT_LIMIT = 20;
     /** Largest page {@code GET /api/history} returns. */
     static final int MAX_LIMIT = 200;
+    /** Flagged domains listed by {@code GET /api/history/stats} by default - as {@code phishnet history stats}. */
+    static final int DEFAULT_TOP_DOMAINS = 10;
+    static final int MAX_TOP_DOMAINS = 100;
 
     private final HistoryDatabase database;
 
@@ -54,6 +58,41 @@ final class HistoryApi {
         body.put("offset", offset);
         body.put("scans", toJson(database.search(criteria.page(limit, offset))));
         return body;
+    }
+
+    /**
+     * {@code GET /api/history/stats?top=}: the figures {@code phishnet history stats}
+     * prints - totals per risk level and type, first/last scan, and the {@code top}
+     * domains with the most MEDIUM/HIGH scans - from the same {@link HistoryDatabase#stats} query.
+     */
+    Map<String, Object> stats(Context ctx) throws SQLException {
+        int top = intParam(ctx, "top", DEFAULT_TOP_DOMAINS, 0, MAX_TOP_DOMAINS);
+        HistoryStats stats = database.stats(top);
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("total", stats.total());
+        body.put("byRiskLevel", enumCounts(stats.byRiskLevel(), RiskLevel.class));
+        body.put("byType", enumCounts(stats.byType(), TargetType.class));
+        body.put("firstScan", stats.firstScan() == null ? null : stats.firstScan().toString());
+        body.put("lastScan", stats.lastScan() == null ? null : stats.lastScan().toString());
+        List<Map<String, Object>> domains = new ArrayList<>();
+        for (HistoryStats.DomainCount domain : stats.topFlaggedDomains()) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("domain", domain.domain());
+            item.put("count", domain.count());
+            domains.add(item);
+        }
+        body.put("topFlaggedDomains", domains);
+        return body;
+    }
+
+    /** Counts keyed by constant name, in declaration order (LOW, MEDIUM, HIGH). */
+    private static <E extends Enum<E>> Map<String, Long> enumCounts(Map<E, Long> counts, Class<E> type) {
+        Map<String, Long> ordered = new LinkedHashMap<>();
+        for (E constant : type.getEnumConstants()) {
+            ordered.put(constant.name(), counts.getOrDefault(constant, 0L));
+        }
+        return ordered;
     }
 
     /** An optional whole-number query parameter within {@code [min, max]}; a 400 otherwise. */

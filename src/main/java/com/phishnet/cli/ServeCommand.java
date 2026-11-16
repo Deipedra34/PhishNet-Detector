@@ -116,6 +116,7 @@ final class ServeCommand implements Callable<Integer> {
         out.println("  POST /api/scan/url");
         out.println("  POST /api/scan/email");
         out.println("  GET  /api/history");
+        out.println("  GET  /api/history/stats");
         if (history != null) {
             out.println("Recording scans to " + history.file());
         }
