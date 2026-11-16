@@ -214,6 +214,20 @@ export function createApiClient({ baseUrl = "", fetchImpl } = {}) {
       }
       return body;
     },
+
+    /**
+     * `GET /api/history/stats`: totals per risk level and type, first/last scan,
+     * and the domains with the most MEDIUM/HIGH scans.
+     *
+     * @param {{top?: number}} [params]
+     */
+    async historyStats(params = {}) {
+      const body = await getJson("/api/history/stats", params);
+      if (typeof body.total !== "number" || typeof body.byRiskLevel !== "object") {
+        throw new ApiError("invalid", `${where} answered, but not with PhishNet history stats.`);
+      }
+      return body;
+    },
   };
 }
 
