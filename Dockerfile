@@ -15,7 +15,19 @@ COPY src ./src
 # dependencies between local rebuilds without baking them into a layer.
 RUN --mount=type=cache,target=/root/.m2 mvn -B clean package
 
-# ---- Stage 2: minimal JRE-only runtime --------------------------------------
+# ---- Stage 2: build the web dashboard -----------------------------------------
+# Static HTML/CSS/JS, so like the jar it is built once on the native platform and
+# shared by every architecture. package.json is copied first so the dependency
+# install layer is reused until the dependencies change.
+FROM --platform=$BUILDPLATFORM node:22-alpine AS dashboard
+
+WORKDIR /dashboard
+COPY dashboard/package*.json ./
+RUN --mount=type=cache,target=/root/.npm npm install --no-audit --no-fund
+COPY dashboard/ ./
+RUN npm run build
+
+# ---- Stage 3: minimal JRE-only runtime --------------------------------------
 FROM eclipse-temurin:26-jre-alpine
 
 # Run as an unprivileged user. A fixed numeric UID/GID lets orchestrators
@@ -31,13 +43,19 @@ RUN addgroup -S -g 10001 phishnet \
 # The jar stays root-owned and read-only to the runtime user.
 COPY --from=build /build/target/phishnet.jar /opt/phishnet/phishnet.jar
 
+# The built dashboard, also root-owned and read-only. "serve" finds it through
+# PHISHNET_DASHBOARD_DIR and serves it at / on the API's port; every other
+# command ignores it.
+COPY --from=dashboard /dashboard/dist /opt/phishnet/dashboard
+ENV PHISHNET_DASHBOARD_DIR=/opt/phishnet/dashboard
+
 # Working directory for relative paths: mount files to scan here, and the default
 # ./phishnet-history.csv and HTML reports are written here.
 WORKDIR /data
 
 USER 10001:10001
 
-# Default port for "serve" mode; publish it with -p when running the API.
+# Default port for "serve" mode (API and web dashboard); publish it with -p.
 EXPOSE 8080
 
 # Arguments to "docker run <image> ..." go straight to the CLI, e.g.

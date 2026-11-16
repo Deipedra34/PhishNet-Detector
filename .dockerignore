@@ -1,5 +1,13 @@
-# The image build only needs pom.xml and src/ - keep everything else out of the
-# build context so it stays small and local artifacts never leak into the image.
+# The image build only needs pom.xml, src/, and the dashboard/ sources - keep
+# everything else out of the build context so it stays small and local artifacts
+# never leak into the image.
+
+# Web dashboard: the image installs and builds it itself
+dashboard/node_modules/
+dashboard/dist/
+dashboard/coverage/
+dashboard/README.md
+!dashboard/index.html
 
 # Build output
 target/
