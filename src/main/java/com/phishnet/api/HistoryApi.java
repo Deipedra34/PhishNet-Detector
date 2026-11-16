@@ -3,6 +3,8 @@ package com.phishnet.api;
 import com.phishnet.history.HistoryDatabase;
 import com.phishnet.history.HistoryEntry;
 import com.phishnet.history.HistoryFilter;
+import io.javalin.http.BadRequestResponse;
+import io.javalin.http.Context;
 
 import java.sql.SQLException;
 import java.util.ArrayList;
@@ -17,8 +19,10 @@ import java.util.Map;
  */
 final class HistoryApi {
 
-    /** How many scans {@code GET /api/history} returns. */
+    /** Page size of {@code GET /api/history} when no {@code limit} is given. */
     static final int DEFAULT_LIMIT = 20;
+    /** Largest page {@code GET /api/history} returns. */
+    static final int MAX_LIMIT = 200;
 
     private final HistoryDatabase database;
 
@@ -26,12 +30,40 @@ final class HistoryApi {
         this.database = database;
     }
 
-    /** {@code GET /api/history}: the most recent scans, newest first. */
-    Map<String, Object> list() throws SQLException {
-        List<HistoryEntry> entries = database.search(HistoryFilter.recent(DEFAULT_LIMIT));
+    /**
+     * {@code GET /api/history?limit=&offset=}: one page of scans, newest first, plus
+     * the total number of scans, so a client can page through them.
+     */
+    Map<String, Object> list(Context ctx) throws SQLException {
+        int limit = intParam(ctx, "limit", DEFAULT_LIMIT, 1, MAX_LIMIT);
+        int offset = intParam(ctx, "offset", 0, 0, Integer.MAX_VALUE);
+        HistoryFilter criteria = HistoryFilter.recent(0);
+
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("scans", toJson(entries));
+        body.put("total", database.count(criteria));
+        body.put("limit", limit);
+        body.put("offset", offset);
+        body.put("scans", toJson(database.search(criteria.page(limit, offset))));
         return body;
+    }
+
+    /** An optional whole-number query parameter within {@code [min, max]}; a 400 otherwise. */
+    static int intParam(Context ctx, String name, int defaultValue, int min, int max) {
+        String raw = ctx.queryParam(name);
+        if (raw == null || raw.isBlank()) {
+            return defaultValue;
+        }
+        int value;
+        try {
+            value = Integer.parseInt(raw.trim());
+        } catch (NumberFormatException e) {
+            throw new BadRequestResponse("Query parameter '" + name + "' must be a whole number");
+        }
+        if (value < min || value > max) {
+            throw new BadRequestResponse("Query parameter '" + name + "' must be "
+                    + (max == Integer.MAX_VALUE ? min + " or more" : "between " + min + " and " + max));
+        }
+        return value;
     }
 
     static List<Map<String, Object>> toJson(List<HistoryEntry> entries) {

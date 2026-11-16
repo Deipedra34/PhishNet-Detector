@@ -203,8 +203,61 @@ public final class HistoryDatabase {
         if (!Files.exists(file)) {
             return List.of();
         }
-        List<String> conditions = new ArrayList<>();
         List<Object> params = new ArrayList<>();
+        // Only fixed SQL fragments are concatenated here; every value is a bound parameter.
+        StringBuilder sql = new StringBuilder("SELECT ").append(COLUMNS).append(" FROM scans")
+                .append(whereClause(filter, params));
+        sql.append(" ORDER BY timestamp DESC, id DESC");
+        if (filter.limit() > 0 || filter.offset() > 0) {
+            // SQLite only takes OFFSET after a LIMIT; -1 means no limit.
+            sql.append(" LIMIT ?");
+            params.add(filter.limit() > 0 ? filter.limit() : -1);
+            if (filter.offset() > 0) {
+                sql.append(" OFFSET ?");
+                params.add(filter.offset());
+            }
+        }
+
+        try (Connection conn = connect();
+             PreparedStatement query = conn.prepareStatement(sql.toString())) {
+            bind(query, params);
+            List<HistoryEntry> entries = new ArrayList<>();
+            try (ResultSet rows = query.executeQuery()) {
+                while (rows.next()) {
+                    entries.add(toEntry(rows));
+                }
+            }
+            return entries;
+        }
+    }
+
+    /**
+     * How many scans match {@code filter}'s criteria, ignoring its limit and offset -
+     * the total a paged {@link #search} is drawn from. 0 when the database file
+     * doesn't exist yet.
+     */
+    public long count(HistoryFilter filter) throws SQLException {
+        if (!Files.exists(file)) {
+            return 0;
+        }
+        List<Object> params = new ArrayList<>();
+        String sql = "SELECT COUNT(*) FROM scans" + whereClause(filter, params);
+        try (Connection conn = connect();
+             PreparedStatement query = conn.prepareStatement(sql)) {
+            bind(query, params);
+            try (ResultSet rows = query.executeQuery()) {
+                rows.next();
+                return rows.getLong(1);
+            }
+        }
+    }
+
+    /**
+     * {@code " WHERE ..."} for {@code filter}'s criteria (or {@code ""} when there are
+     * none), adding the values to bind to {@code params} in order.
+     */
+    private static String whereClause(HistoryFilter filter, List<Object> params) {
+        List<String> conditions = new ArrayList<>();
         if (filter.targetContains() != null) {
             conditions.add("(target LIKE ? ESCAPE '\\' OR domain LIKE ? ESCAPE '\\' OR subject LIKE ? ESCAPE '\\')");
             String pattern = "%" + escapeLike(filter.targetContains()) + "%";
@@ -228,30 +281,12 @@ public final class HistoryDatabase {
             conditions.add("timestamp < ?");
             params.add(TIMESTAMP_FORMAT.format(filter.until()));
         }
+        return conditions.isEmpty() ? "" : " WHERE " + String.join(" AND ", conditions);
+    }
 
-        // Only fixed SQL fragments are concatenated here; every value is a bound parameter.
-        StringBuilder sql = new StringBuilder("SELECT ").append(COLUMNS).append(" FROM scans");
-        if (!conditions.isEmpty()) {
-            sql.append(" WHERE ").append(String.join(" AND ", conditions));
-        }
-        sql.append(" ORDER BY timestamp DESC, id DESC");
-        if (filter.limit() > 0) {
-            sql.append(" LIMIT ?");
-            params.add(filter.limit());
-        }
-
-        try (Connection conn = connect();
-             PreparedStatement query = conn.prepareStatement(sql.toString())) {
-            for (int i = 0; i < params.size(); i++) {
-                query.setObject(i + 1, params.get(i));
-            }
-            List<HistoryEntry> entries = new ArrayList<>();
-            try (ResultSet rows = query.executeQuery()) {
-                while (rows.next()) {
-                    entries.add(toEntry(rows));
-                }
-            }
-            return entries;
+    private static void bind(PreparedStatement statement, List<Object> params) throws SQLException {
+        for (int i = 0; i < params.size(); i++) {
+            statement.setObject(i + 1, params.get(i));
         }
     }
 

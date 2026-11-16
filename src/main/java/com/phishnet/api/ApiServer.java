@@ -156,7 +156,7 @@ public final class ApiServer {
         config.routes.get("/api/health", ctx -> respond(ctx, HttpStatus.OK, Map.of("status", "ok")));
         config.routes.post("/api/scan/url", this::scanUrl);
         config.routes.post("/api/scan/email", this::scanEmail);
-        config.routes.get("/api/history", ctx -> respond(ctx, HttpStatus.OK, history().list()));
+        config.routes.get("/api/history", ctx -> respond(ctx, HttpStatus.OK, history().list(ctx)));
         // Per endpoint rather than "/api/*", so an unknown path still answers 404, not 405.
         for (String path : List.of("/api/health", "/api/scan/url", "/api/scan/email", "/api/history")) {
             config.routes.options(path, this::preflight);
