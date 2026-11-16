@@ -3,6 +3,7 @@ package com.phishnet.api;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.phishnet.feeds.ThreatFeedService;
 import com.phishnet.history.HistoryDatabase;
 import io.javalin.Javalin;
 import io.javalin.config.JavalinConfig;
@@ -36,6 +37,7 @@ import java.util.regex.Pattern;
  *       or JSON {@code {"raw":"<full .eml text>"}}</li>
  *   <li>{@code GET  /api/history}    - one page of scans from the SQLite scan history, filterable (read-only)</li>
  *   <li>{@code GET  /api/history/stats} - the aggregate figures of {@code phishnet history stats}</li>
+ *   <li>{@code GET  /api/feeds/status} - threat feed cache state, as {@code phishnet feeds status}</li>
  * </ul>
  *
  * Every error - bad input, unknown route, oversized body, or an unexpected
@@ -78,6 +80,8 @@ public final class ApiServer {
     private Javalin app;
     /** Read-only history endpoints, or {@code null} when no history database was given. */
     private HistoryApi historyApi;
+    /** Threat feed status endpoint, or {@code null} when no feed service was given. */
+    private FeedsApi feedsApi;
 
     /**
      * @param log where unexpected (500) errors are reported, with their stack trace
@@ -103,6 +107,16 @@ public final class ApiServer {
     public ApiServer withHistory(HistoryDatabase database) {
         requireNotStarted();
         this.historyApi = database == null ? null : new HistoryApi(database);
+        return this;
+    }
+
+    /**
+     * Serves {@code GET /api/feeds/status} from {@code service}'s cache (no downloads).
+     * Must be called before {@link #start}; without it that endpoint answers 503.
+     */
+    public ApiServer withFeeds(ThreatFeedService service) {
+        requireNotStarted();
+        this.feedsApi = service == null ? null : new FeedsApi(service);
         return this;
     }
 
@@ -159,9 +173,10 @@ public final class ApiServer {
         config.routes.post("/api/scan/email", this::scanEmail);
         config.routes.get("/api/history", ctx -> respond(ctx, HttpStatus.OK, history().list(ctx)));
         config.routes.get("/api/history/stats", ctx -> respond(ctx, HttpStatus.OK, history().stats(ctx)));
+        config.routes.get("/api/feeds/status", ctx -> respond(ctx, HttpStatus.OK, feeds().status()));
         // Per endpoint rather than "/api/*", so an unknown path still answers 404, not 405.
         for (String path : List.of("/api/health", "/api/scan/url", "/api/scan/email", "/api/history",
-                "/api/history/stats")) {
+                "/api/history/stats", "/api/feeds/status")) {
             config.routes.options(path, this::preflight);
         }
 
@@ -215,6 +230,14 @@ public final class ApiServer {
                     "Scan history is not available on this server");
         }
         return historyApi;
+    }
+
+    private FeedsApi feeds() {
+        if (feedsApi == null) {
+            throw new HttpResponseException(HttpStatus.SERVICE_UNAVAILABLE.getCode(),
+                    "Threat feed status is not available on this server");
+        }
+        return feedsApi;
     }
 
     // --- CORS (browser extensions only) -------------------------------------------

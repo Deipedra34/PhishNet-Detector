@@ -282,7 +282,7 @@ public final class Main implements Callable<Integer> {
         // picocli would still enforce this command's required --url/--email/--batch group
         // for "phishnet serve", and relaxing that group would change normal CLI parsing.
         if (args.length > 0 && args[0].equals(SERVE_COMMAND)) {
-            ServeCommand serve = new ServeCommand(out, err, whoisClient);
+            ServeCommand serve = new ServeCommand(out, err, whoisClient, threatFeeds);
             return execute(new CommandLine(serve), Arrays.copyOfRange(args, 1, args.length), out, err);
         }
         // Same reasoning for "history", which takes no scan input at all.

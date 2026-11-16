@@ -3,6 +3,8 @@ package com.phishnet.cli;
 import com.phishnet.analyzer.WhoisClient;
 import com.phishnet.api.ApiServer;
 import com.phishnet.api.ScanService;
+import com.phishnet.feeds.ThreatFeedService;
+import com.phishnet.feeds.ThreatFeedSettings;
 import com.phishnet.history.HistoryDatabase;
 import com.phishnet.model.PhishNetConfig;
 import com.phishnet.util.ConfigLoader;
@@ -15,6 +17,7 @@ import picocli.CommandLine.Spec;
 import java.io.PrintStream;
 import java.nio.file.Path;
 import java.util.concurrent.Callable;
+import java.util.function.Function;
 
 /**
  * {@code phishnet serve}: runs the REST API ({@link ApiServer}) instead of a
@@ -70,11 +73,18 @@ final class ServeCommand implements Callable<Integer> {
     private final PrintStream out;
     private final PrintStream err;
     private final WhoisClient whoisClient;
+    private final Function<ThreatFeedSettings, ThreatFeedService> threatFeeds;
 
-    ServeCommand(PrintStream out, PrintStream err, WhoisClient whoisClient) {
+    /**
+     * @param threatFeeds builds the feed service behind {@code GET /api/feeds/status}
+     *                    ({@link ThreatFeedService#live} outside tests); only its cache is read
+     */
+    ServeCommand(PrintStream out, PrintStream err, WhoisClient whoisClient,
+                 Function<ThreatFeedSettings, ThreatFeedService> threatFeeds) {
         this.out = out;
         this.err = err;
         this.whoisClient = whoisClient;
+        this.threatFeeds = threatFeeds;
     }
 
     @Override
@@ -102,7 +112,8 @@ final class ServeCommand implements Callable<Integer> {
         // even with --no-history-db (which only stops this server from recording scans).
         HistoryDatabase historyReader = new HistoryDatabase(historyFile, false, err);
         ApiServer server = new ApiServer(new ScanService(config, noWhois ? null : whoisClient, history), err)
-                .withHistory(historyReader);
+                .withHistory(historyReader)
+                .withFeeds(threatFeeds.apply(config.threatFeeds().withEnvironment(System.getenv())));
         try {
             server.start(port);
         } catch (RuntimeException e) {
@@ -117,6 +128,7 @@ final class ServeCommand implements Callable<Integer> {
         out.println("  POST /api/scan/email");
         out.println("  GET  /api/history");
         out.println("  GET  /api/history/stats");
+        out.println("  GET  /api/feeds/status");
         if (history != null) {
             out.println("Recording scans to " + history.file());
         }
