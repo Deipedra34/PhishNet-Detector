@@ -2,6 +2,8 @@ package com.phishnet.queue;
 
 import redis.clients.jedis.DefaultJedisClientConfig;
 import redis.clients.jedis.JedisClientConfig;
+import redis.clients.jedis.SslOptions;
+import redis.clients.jedis.SslVerifyMode;
 
 import java.util.Objects;
 
@@ -43,10 +45,15 @@ public record RedisSettings(String host, int port, String username, String passw
         DefaultJedisClientConfig.Builder builder = DefaultJedisClientConfig.builder()
                 .connectionTimeoutMillis(CONNECT_TIMEOUT_MILLIS)
                 .socketTimeoutMillis(SOCKET_TIMEOUT_MILLIS)
-                .ssl(ssl)
                 // Plain RESP2 is all LPUSH/BRPOP need; skips Jedis's per-connection warning about RESP3.
                 .autoNegotiateProtocol(false)
                 .clientName("phishnet");
+        if (ssl) {
+            // Setting SslOptions is what turns TLS on (the boolean ssl(...) switch is deprecated).
+            // CA mode checks the certificate chain against the JVM's trust store without a
+            // hostname check - exactly what ssl(true) did.
+            builder.sslOptions(SslOptions.builder().sslVerifyMode(SslVerifyMode.CA).build());
+        }
         if (username != null) {
             builder.user(username);
         }
