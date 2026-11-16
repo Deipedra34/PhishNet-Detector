@@ -328,7 +328,7 @@ See the project README for the full option reference and sample output.
 
 ```
 $ java -jar target/phishnet.jar --version
-phishnet 3.0.0
+phishnet 2.8.0
 ```
 
 `--version` always reflects the version actually built (Maven filters it into
@@ -2110,7 +2110,7 @@ or empty sections (brands, TLDs, weights).
 `mvn test` runs [JaCoCo](https://www.jacoco.org/jacoco/) automatically and
 generates an HTML report at `target/site/jacoco/index.html` - open that file
 in a browser for a line-by-line, package-by-package breakdown. The suite
-(698 tests as of this writing) maintains roughly **90% line / 80% branch**
+(700 tests as of this writing) maintains roughly **90% line / 80% branch**
 coverage overall; the biggest remaining gaps are `SslChecker`'s real-socket
 TLS handshake path and `SocketWhoisClient`'s port-43 I/O, which by design
 aren't exercised without a live network connection (the certificate-decision
