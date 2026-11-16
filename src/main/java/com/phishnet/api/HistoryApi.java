@@ -1,8 +1,10 @@
 package com.phishnet.api;
 
+import com.phishnet.cli.HistoryWriter.TargetType;
 import com.phishnet.history.HistoryDatabase;
 import com.phishnet.history.HistoryEntry;
 import com.phishnet.history.HistoryFilter;
+import com.phishnet.model.RiskLevel;
 import io.javalin.http.BadRequestResponse;
 import io.javalin.http.Context;
 
@@ -31,13 +33,20 @@ final class HistoryApi {
     }
 
     /**
-     * {@code GET /api/history?limit=&offset=}: one page of scans, newest first, plus
-     * the total number of scans, so a client can page through them.
+     * {@code GET /api/history?limit=&offset=&target=&risk=&type=}: one page of the
+     * matching scans, newest first, plus how many match in total, so a client can
+     * page through them. The filters are those of {@code phishnet history search}:
+     * {@code target} is a case-insensitive substring of the URL, domain, email file
+     * name, or subject; {@code risk} and {@code type} are exact (case-insensitive).
      */
     Map<String, Object> list(Context ctx) throws SQLException {
         int limit = intParam(ctx, "limit", DEFAULT_LIMIT, 1, MAX_LIMIT);
         int offset = intParam(ctx, "offset", 0, 0, Integer.MAX_VALUE);
-        HistoryFilter criteria = HistoryFilter.recent(0);
+        String target = ctx.queryParam("target");
+        RiskLevel risk = enumParam(ctx, "risk", RiskLevel.class);
+        TargetType type = enumParam(ctx, "type", TargetType.class);
+        HistoryFilter criteria = new HistoryFilter(target == null ? null : target.trim(), risk, type,
+                null, null, 0);
 
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("total", database.count(criteria));
@@ -64,6 +73,23 @@ final class HistoryApi {
                     + (max == Integer.MAX_VALUE ? min + " or more" : "between " + min + " and " + max));
         }
         return value;
+    }
+
+    /** An optional enum query parameter, by constant name in any case; a 400 for anything else. */
+    static <E extends Enum<E>> E enumParam(Context ctx, String name, Class<E> type) {
+        String raw = ctx.queryParam(name);
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        String wanted = raw.trim();
+        List<String> names = new ArrayList<>();
+        for (E constant : type.getEnumConstants()) {
+            if (constant.name().equalsIgnoreCase(wanted)) {
+                return constant;
+            }
+            names.add(constant.name());
+        }
+        throw new BadRequestResponse("Query parameter '" + name + "' must be one of " + String.join(", ", names));
     }
 
     static List<Map<String, Object>> toJson(List<HistoryEntry> entries) {
