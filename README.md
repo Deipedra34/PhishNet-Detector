@@ -17,6 +17,8 @@ keywords, and scoring weights - lives in a YAML config file, not in the code.
 It runs as a command-line tool by default, and can optionally run as a small
 JSON REST API server (`phishnet serve`) exposing the same URL and email
 scanning over HTTP - see [REST API (serve mode)](#rest-api-serve-mode).
+The same server can host a [web dashboard](#web-dashboard) (React) for
+scanning, browsing history, and checking stats and feed status in a browser.
 A companion [browser extension](#browser-extension) for Chrome, Edge and
 Firefox uses that API to check the page you're on with one click, and
 `phishnet monitor` watches a mailbox over IMAP and scans new mail as it
@@ -49,6 +51,7 @@ signal on top of everything else. See
 - [Machine Learning Layer (experimental)](#machine-learning-layer-experimental)
 - [Threat Intelligence Feeds](#threat-intelligence-feeds)
 - [REST API (serve mode)](#rest-api-serve-mode)
+- [Web Dashboard](#web-dashboard)
 - [Browser extension](#browser-extension)
 - [Real-Time Email Monitoring](#real-time-email-monitoring)
 - [Parallel & Distributed Scanning](#parallel--distributed-scanning)
@@ -1078,7 +1081,11 @@ PhishNet API listening on http://localhost:8080 (Ctrl+C to stop)
   GET  /api/health
   POST /api/scan/url
   POST /api/scan/email
+  GET  /api/history
+  GET  /api/history/stats
+  GET  /api/feeds/status
 Recording scans to /home/alice/.phishnet/phishnet-history.db
+Web dashboard: http://localhost:8080/ (from /home/alice/PhishNet-Detector/dashboard/dist)
 ```
 
 | Option | Meaning |
@@ -1087,11 +1094,14 @@ Recording scans to /home/alice/.phishnet/phishnet-history.db
 | `--config <path>` | Use a custom YAML config instead of the bundled default (same as the CLI) |
 | `--no-whois` | Skip the live WHOIS domain-age lookup for URL scans (same as the CLI) |
 | `--history-db <path>` | Record API scans in this SQLite database (default `~/.phishnet/phishnet-history.db`, same as the CLI) |
-| `--no-history-db` | Don't record API scans in the scan history database |
+| `--no-history-db` | Don't record API scans in the scan history database (the read-only history endpoints still read it) |
+| `--dashboard <dir>` | Serve the built [web dashboard](#web-dashboard) from this directory (default: found automatically, see below) |
+| `--no-dashboard` | Serve the REST API only, even if the dashboard has been built |
 
 The server runs until stopped with Ctrl+C (or SIGTERM), which shuts it down
 cleanly. Exit code `2` means a bad option (e.g. an out-of-range port), `1`
-means the config couldn't be loaded or the port couldn't be bound.
+means the config couldn't be loaded, the port couldn't be bound, or
+`--dashboard` points at a directory without an `index.html`.
 
 ### Endpoints
 
@@ -1100,6 +1110,9 @@ means the config couldn't be loaded or the port couldn't be bound.
 | `GET` | `/api/health` | - | `{"status":"ok"}` |
 | `POST` | `/api/scan/url` | JSON `{"url": "..."}` | URL scan result |
 | `POST` | `/api/scan/email` | multipart upload of a `.eml` file in form field `file`, **or** JSON `{"raw": "<full email source>"}` | email scan result |
+| `GET` | `/api/history` | query `limit`, `offset`, `target`, `risk`, `type` (all optional) | one page of past scans, newest first (read-only) |
+| `GET` | `/api/history/stats` | query `top` (optional) | the `phishnet history stats` figures |
+| `GET` | `/api/feeds/status` | - | the `phishnet feeds status` figures |
 
 Every scan result has the same core fields as the CLI's `--json` output -
 `target`, `score` (0-100), `level` (`LOW`/`MEDIUM`/`HIGH`), `recommendation`,
@@ -1280,6 +1293,98 @@ curl -X POST http://localhost:8080/api/scan/email \
 }
 ```
 
+#### `GET /api/history`
+
+Reads the [scan history database](#scan-history) through the same query as
+`phishnet history search`, so CLI and API scans both show up. Nothing is written,
+and a database that doesn't exist yet just reads as empty.
+
+| Parameter | Meaning |
+| --- | --- |
+| `limit` | Page size, `1`-`200` (default `20`) |
+| `offset` | Matching scans to skip, for paging (default `0`) |
+| `target` | Case-insensitive substring of the URL, domain, email file name, or subject (`%` and `_` match literally) |
+| `risk` | `LOW`, `MEDIUM`, or `HIGH` (any case) |
+| `type` | `URL` or `EMAIL` (any case) |
+
+```bash
+curl "http://localhost:8080/api/history?risk=high&target=paypa&limit=1"
+```
+
+```json
+{
+  "total": 2,
+  "limit": 1,
+  "offset": 0,
+  "scans": [
+    {
+      "id": 41,
+      "timestamp": "2026-11-12T09:30:12.512Z",
+      "type": "URL",
+      "target": "http://paypa1-secure-login.tk/verify",
+      "domain": "paypa1-secure-login.tk",
+      "subject": null,
+      "riskScore": 70,
+      "riskLevel": "HIGH",
+      "reasons": [
+        { "id": "suspiciousTld", "description": "URL uses a TLD commonly abused for phishing" },
+        { "id": "typosquatting", "description": "Domain segment 'paypa1' closely resembles brand 'paypal' (edit distance 1)" }
+      ],
+      "domainAgeDays": null
+    }
+  ]
+}
+```
+
+`total` counts every scan matching the filters, so `offset` can page through them.
+
+#### `GET /api/history/stats`
+
+The figures `phishnet history stats` prints, from the same query. `top` (`0`-`100`,
+default `10`) sets how many flagged domains to list.
+
+```json
+{
+  "total": 128,
+  "byRiskLevel": { "LOW": 91, "MEDIUM": 22, "HIGH": 15 },
+  "byType": { "URL": 117, "EMAIL": 11 },
+  "firstScan": "2026-10-01T08:12:44.020Z",
+  "lastScan": "2026-11-12T09:30:12.512Z",
+  "topFlaggedDomains": [
+    { "domain": "paypa1-secure-login.tk", "count": 6 },
+    { "domain": "micros0ft-support.xyz", "count": 3 }
+  ]
+}
+```
+
+#### `GET /api/feeds/status`
+
+Each threat feed's cached copy, as `phishnet feeds status` shows it. It reads the
+cache only and never starts a download (`phishnet feeds update` does that).
+
+```json
+{
+  "cacheDirectory": "/home/alice/.phishnet/feeds",
+  "refreshIntervalSeconds": 3600,
+  "offline": false,
+  "checkedAt": "2026-11-12T09:31:00.004Z",
+  "feeds": [
+    {
+      "source": "openphish", "name": "OpenPhish", "state": "FRESH", "available": true,
+      "refreshedAt": "2026-11-12T09:02:41.118Z", "ageSeconds": 1698, "entries": 41230,
+      "lastError": null, "detail": null
+    },
+    {
+      "source": "phishtank", "name": "PhishTank", "state": "NOT_CONFIGURED", "available": false,
+      "refreshedAt": null, "ageSeconds": null, "entries": 0, "lastError": null,
+      "detail": "no API key configured (set PHISHNET_PHISHTANK_API_KEY or threatFeeds.phishTank.apiKey)"
+    }
+  ]
+}
+```
+
+`state` is one of `FRESH`, `STALE`, `MISSING`, `DISABLED`, `NOT_CONFIGURED`, or `OFF`.
+
 ### Errors and limits
 
 Every error response is JSON of the form `{"error": "message"}` - internal
@@ -1288,11 +1393,11 @@ details and stack traces are only ever written to the server's own log
 
 | Status | When |
 | --- | --- |
-| `200` | Scan completed (whatever the risk level) |
-| `400` | Missing, empty, or malformed input: empty body, invalid JSON, a body that isn't a JSON object, missing/empty/non-string `url` or `raw`, a URL over 8192 characters, a multipart request without a `file` field, an empty uploaded file, or an unreadable multipart body |
+| `200` | Scan completed (whatever the risk level), or a history/stats/feed status read |
+| `400` | Missing, empty, or malformed input: empty body, invalid JSON, a body that isn't a JSON object, missing/empty/non-string `url` or `raw`, a URL over 8192 characters, a multipart request without a `file` field, an empty uploaded file, or an unreadable multipart body; for the history endpoints, a `limit`/`offset`/`top` that isn't a whole number in range, or an unknown `risk`/`type` |
 | `404` / `405` | Unknown path, or wrong HTTP method for a known path |
 | `413` | Request body larger than 5 MB |
-| `500` | Unexpected internal failure (`{"error": "Internal server error"}`) |
+| `500` | Unexpected internal failure (`{"error": "Internal server error"}`), or an unreadable history database |
 
 ```bash
 $ curl -i -X POST http://localhost:8080/api/scan/url -H "Content-Type: application/json" -d '{}'
@@ -1319,7 +1424,79 @@ Notes:
   an `Access-Control-Allow-Origin` header echoing their origin, and their
   `OPTIONS` preflight is answered with `204`. Ordinary websites get no CORS
   headers - a page open in your browser can't read results from a server on
-  your machine - and every other response is unchanged.
+  your machine - and every other response is unchanged. The
+  [web dashboard](#web-dashboard) is served from the API's own origin, so it
+  needs no CORS at all.
+
+## Web Dashboard
+
+[`dashboard/`](dashboard/) is a browser UI for the REST API, built with React and
+Vite: scan URLs and emails, browse and filter the scan history, see stats, and
+check the threat feeds, on top of the CLI, API, and browser extension (all of
+which work exactly as before). `phishnet serve` hosts the built dashboard on the
+same port as the API, so once it's built, opening `http://localhost:8080/` is all
+it takes.
+
+<!-- Screenshot placeholder: add a capture of the Scan page at assets/dashboard.png
+     and replace this comment with:
+     <p align="center"><img src="assets/dashboard.png" alt="PhishNet web dashboard" width="100%"></p> -->
+
+> **Screenshot (placeholder).** The dashboard uses the project's dark navy and
+> rose (`#fb7185`) branding. A top bar with the PhishNet logo links the four pages.
+> The **Scan** page has URL/Email tabs; a result appears as a card with a colored
+> border and badge (green LOW, amber MEDIUM, red HIGH), the 0-100 score and a score
+> bar, the recommendation, threat feed match labels, domain age, ML confidence when
+> the result includes it, and the matched signals with their evidence. **History**
+> is a searchable, filterable, paginated table; **Stats** shows total scans, scans
+> per risk level as labeled bars, and the most frequently flagged domains;
+> **Feeds** shows a card per feed with its fresh/stale/missing state, last refresh,
+> and entry count.
+
+| Page | Shows | Backed by |
+| --- | --- | --- |
+| Scan | URL form, or `.eml` upload / pasted email source, and the result card | `POST /api/scan/url`, `POST /api/scan/email` |
+| History | Past CLI and API scans with search, risk/type filters, and pagination | `GET /api/history` |
+| Stats | Total scans, counts by risk level and type, most frequently flagged domains | `GET /api/history/stats` |
+| Feeds | OpenPhish/PhishTank cache freshness, last refresh, entry counts | `GET /api/feeds/status` |
+
+The history, stats, and feed endpoints are read-only and run the same queries as
+`phishnet history` and `phishnet feeds status`, so the dashboard and the CLI always
+agree.
+
+### Running it
+
+Build the dashboard once (Node.js 18.18+), then start the server from the repository root:
+
+```bash
+cd dashboard && npm install && npm run build && cd ..
+java -jar target/phishnet.jar serve
+# Web dashboard: http://localhost:8080/ (from .../dashboard/dist)
+```
+
+Without `--dashboard`, `phishnet serve` serves the first of these that has an
+`index.html`: the directory in `PHISHNET_DASHBOARD_DIR`, `./dashboard/dist`, or a
+`dashboard/` folder next to `phishnet.jar`. If there's none, it serves the API only,
+exactly as before, and says so at startup. The dashboard calls the API with relative
+paths, and client-side routes such as `/history?risk=HIGH` survive a reload. API
+paths keep their JSON responses and errors.
+
+The [Docker image](#docker) builds and includes the dashboard, so it works there
+with no extra steps.
+
+### Development mode
+
+For working on the dashboard itself, run the API and Vite's dev server side by side.
+The dev server reloads on every edit and proxies `/api/...` to the API (set
+`PHISHNET_API_URL` to use something other than `http://localhost:8080`):
+
+```bash
+java -jar target/phishnet.jar serve       # terminal 1
+cd dashboard && npm run dev               # terminal 2: http://localhost:5173
+```
+
+`npm test` runs the dashboard's unit tests (Vitest). See
+[dashboard/README.md](dashboard/README.md) for the full setup, the build options,
+and how to point the dashboard at a different API address.
 
 ## Browser extension
 
@@ -1728,6 +1905,19 @@ docker run -d --name phishnet-api -p 9090:8080 ghcr.io/deipedra34/phishnet-detec
 curl http://localhost:8080/api/health
 ```
 
+The image includes the built [web dashboard](#web-dashboard) (in
+`/opt/phishnet/dashboard`, found through `PHISHNET_DASHBOARD_DIR`), so in serve mode
+`http://localhost:8080/` opens it, on the same port as the API. Mount the history
+volume to see your saved scans in it, and add `--no-dashboard` for the API alone:
+
+```bash
+docker run --rm -p 8080:8080 -v phishnet-history:/home/phishnet/.phishnet \
+  ghcr.io/deipedra34/phishnet-detector serve
+# then open http://localhost:8080/
+```
+
+Every other command ignores the dashboard, so scan mode and the rest are unchanged.
+
 To use a custom config in either mode, mount it and point `--config` at it:
 
 ```bash
@@ -1761,8 +1951,10 @@ docker run --rm phishnet-detector --url https://example.com
 ```
 
 The [`Dockerfile`](Dockerfile) is multi-stage: a Maven + JDK 26 stage runs
-`mvn clean package` (tests included), and only the resulting jar is copied
-into a minimal `eclipse-temurin:26-jre-alpine` runtime image.
+`mvn clean package` (tests included), a Node.js 22 stage runs
+`npm install && npm run build` for the web dashboard, and only the resulting jar
+and the dashboard's static files are copied into a minimal
+`eclipse-temurin:26-jre-alpine` runtime image (no Node.js in it).
 
 ## Configuration
 
@@ -1844,6 +2036,12 @@ real server on a random free port and call it over HTTP with the JDK's
 error path, the JSON error shape, and the extension-only CORS rules (headers and
 preflight for `chrome-extension://`/`moz-extension://` origins, none for
 websites) - still with no external network access.
+`DashboardApiTest` does the same for the dashboard's endpoints: `/api/history`
+pagination (`limit`/`offset`/`total`), target/risk/type filtering and validation,
+`/api/history/stats` figures checked against the `history stats` query,
+`/api/feeds/status` for fresh, stale, missing, not-configured, and offline feeds,
+and the static dashboard serving (client-side routes, missing assets, and API
+errors staying JSON).
 `HistoryDatabaseTest` covers the SQLite scan history (schema creation, inserts,
 listing, target/risk/type/date filters, LIKE-wildcard and SQL-injection-style
 search text, stats aggregation, write failures) against a fresh database file
@@ -1912,7 +2110,7 @@ or empty sections (brands, TLDs, weights).
 `mvn test` runs [JaCoCo](https://www.jacoco.org/jacoco/) automatically and
 generates an HTML report at `target/site/jacoco/index.html` - open that file
 in a browser for a line-by-line, package-by-package breakdown. The suite
-(666 tests as of this writing) maintains roughly **90% line / 80% branch**
+(698 tests as of this writing) maintains roughly **90% line / 80% branch**
 coverage overall; the biggest remaining gaps are `SslChecker`'s real-socket
 TLS handshake path and `SocketWhoisClient`'s port-43 I/O, which by design
 aren't exercised without a live network connection (the certificate-decision
@@ -1925,6 +2123,13 @@ them explicitly with:
 
 ```bash
 mvn test -Dgroups=network -DexcludedGroups=none
+```
+
+The web dashboard has its own small Vitest suite (the API client and the scan
+result card), run separately from Maven:
+
+```bash
+cd dashboard && npm install && npm test
 ```
 
 ## Project layout
@@ -1941,7 +2146,7 @@ src/main/java/com/phishnet/
   ml/         FeatureVector, FeatureExtractor, LogisticRegression, TrainingData, MlModel, MlScorer, MlPrediction (experimental ML layer)
   feeds/      ThreatFeedService, ThreatFeedIndex, FeedCache, FeedParser, FeedUrls, HttpFeedFetcher, ThreatFeedSettings (threat intelligence feeds)
   mail/       MailMonitorService, MailSource, ImapMailSource, Pop3MailSource, MessageConverter, MonitorActions, Backoff, MailServerSettings (mailbox monitoring)
-  api/        ApiServer (Javalin routes, validation, JSON errors), ScanService (analyzer/scorer wrapper)
+  api/        ApiServer (Javalin routes, validation, JSON errors, dashboard static files), ScanService (analyzer/scorer wrapper), HistoryApi and FeedsApi (read-only dashboard endpoints)
   util/       LevenshteinDistance, HomoglyphUtil, ConfigLoader, AnsiColor, ColorSupport
 src/main/resources/phishnet-config.yaml
 src/main/resources/training-data.csv  (bundled example dataset for the ML layer)
@@ -1951,6 +2156,7 @@ src/test/java/...            (mirrors the layout above)
 src/test/resources/urls/     phishing_urls.txt, legitimate_urls.txt
 src/test/resources/emails/   .eml fixtures (phishing and legitimate)
 Dockerfile, .dockerignore    container image (see Docker)
+dashboard/                   React + Vite web dashboard (see Web Dashboard)
 browser-extension/           Chrome/Edge/Firefox extension (see Browser extension)
 .github/workflows/           ci.yml, release.yml, docker-publish.yml
 ```
