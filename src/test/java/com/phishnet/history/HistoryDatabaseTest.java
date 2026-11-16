@@ -343,6 +343,45 @@ class HistoryDatabaseTest {
                 targets(db.search(new HistoryFilter(null, null, null, null, boundary, 0))));
     }
 
+    // --- paging -----------------------------------------------------------------
+
+    @Test
+    void offsetSkipsNewestMatchesForPaging() throws Exception {
+        for (int i = 1; i <= 5; i++) {
+            recordUrl("https://site" + i + ".com", i % 2 == 0 ? RiskLevel.HIGH : RiskLevel.LOW);
+        }
+
+        assertEquals(List.of("https://site3.com", "https://site2.com"),
+                targets(db.search(HistoryFilter.recent(0).page(2, 2))));
+        // An offset with no limit returns everything after it.
+        assertEquals(List.of("https://site2.com", "https://site1.com"),
+                targets(db.search(HistoryFilter.recent(0).page(0, 3))));
+        // Paging applies within the filtered matches.
+        HistoryFilter high = new HistoryFilter(null, RiskLevel.HIGH, null, null, null, 0);
+        assertEquals(List.of("https://site2.com"), targets(db.search(high.page(1, 1))));
+        assertEquals(List.of(), targets(db.search(high.page(10, 5))));
+    }
+
+    @Test
+    void countMatchesTheFilterIgnoringLimitAndOffset() throws Exception {
+        assertEquals(0, db.count(HistoryFilter.recent(0)));
+        assertFalse(Files.exists(file), "counting must not create the database");
+
+        recordUrl("https://paypal.com", RiskLevel.LOW);
+        recordUrl("http://paypa1.tk", RiskLevel.HIGH);
+        recordUrl("http://evil.tk", RiskLevel.HIGH);
+
+        assertEquals(3, db.count(HistoryFilter.recent(1)));
+        assertEquals(2, db.count(new HistoryFilter(null, RiskLevel.HIGH, null, null, null, 1, 1)));
+        assertEquals(2, db.count(targetFilter("paypa")));
+    }
+
+    @Test
+    void negativeOffsetIsRejected() {
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                () -> new HistoryFilter(null, null, null, null, null, 0, -1));
+    }
+
     // --- stats ------------------------------------------------------------------
 
     @Test

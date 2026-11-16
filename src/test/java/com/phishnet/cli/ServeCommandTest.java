@@ -8,10 +8,12 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -89,6 +91,59 @@ class ServeCommandTest {
         assertEquals(1, result.exitCode());
         assertTrue(result.stderr().contains("could not load config"), result.stderr());
         assertFalse(result.stdout().contains("listening"), result.stdout());
+    }
+
+    // --- web dashboard ------------------------------------------------------------
+
+    private static Path builtDashboard(Path dir) throws IOException {
+        Files.createDirectories(dir);
+        Files.writeString(dir.resolve("index.html"), "<!doctype html>");
+        return dir;
+    }
+
+    @Test
+    void dashboardDirectoryFromEnvironmentComesFirst(@TempDir Path tempDir) throws IOException {
+        Path fromEnv = builtDashboard(tempDir.resolve("env"));
+        builtDashboard(tempDir.resolve("cwd").resolve("dashboard").resolve("dist"));
+
+        assertEquals(fromEnv, ServeCommand.findDashboard(fromEnv.toString(), tempDir.resolve("cwd"), null));
+    }
+
+    @Test
+    void dashboardFallsBackToSourceCheckoutThenJarDirectory(@TempDir Path tempDir) throws IOException {
+        Path checkout = builtDashboard(tempDir.resolve("cwd").resolve("dashboard").resolve("dist"));
+        Path besideJar = builtDashboard(tempDir.resolve("jar").resolve("dashboard"));
+
+        // An env var pointing at nothing usable is skipped.
+        assertEquals(checkout, ServeCommand.findDashboard(tempDir.resolve("missing").toString(),
+                tempDir.resolve("cwd"), tempDir.resolve("jar")));
+        assertEquals(besideJar, ServeCommand.findDashboard(null, tempDir.resolve("elsewhere"), tempDir.resolve("jar")));
+    }
+
+    @Test
+    void noBuiltDashboardMeansApiOnly(@TempDir Path tempDir) throws IOException {
+        // A directory without index.html (e.g. built but then cleaned) doesn't count.
+        Files.createDirectories(tempDir.resolve("dashboard").resolve("dist"));
+
+        assertNull(ServeCommand.findDashboard("", tempDir, null));
+    }
+
+    @Test
+    void explicitDashboardWithoutIndexFailsBeforeStartingServer(@TempDir Path tempDir) {
+        Captured result = runMain("serve", "--port", "0", "--no-history-db",
+                "--dashboard", tempDir.resolve("nothing-here").toString());
+
+        assertEquals(1, result.exitCode());
+        assertTrue(result.stderr().contains("has no index.html"), result.stderr());
+        assertFalse(result.stdout().contains("listening"), result.stdout());
+    }
+
+    @Test
+    void serveHelpDescribesDashboardOptions() {
+        Captured result = runMain("serve", "--help");
+
+        assertTrue(result.stdout().contains("--dashboard"), result.stdout());
+        assertTrue(result.stdout().contains("--no-dashboard"), result.stdout());
     }
 
     @Test
