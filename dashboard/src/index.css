@@ -33,3 +33,28 @@ body {
 .app-main {
   padding: 0 24px 24px;
 }
+
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.app-nav {
+  display: flex;
+  gap: 16px;
+}
+
+.app-nav a {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.app-nav a.active {
+  color: var(--accent);
+}
+
+.muted {
+  color: var(--muted);
+}
