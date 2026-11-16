@@ -228,6 +228,15 @@ export function createApiClient({ baseUrl = "", fetchImpl } = {}) {
       }
       return body;
     },
+
+    /** `GET /api/feeds/status`: each threat feed's cache state (the server never downloads for this). */
+    async feedsStatus() {
+      const body = await getJson("/api/feeds/status");
+      if (!Array.isArray(body.feeds)) {
+        throw new ApiError("invalid", `${where} answered, but not with PhishNet feed status.`);
+      }
+      return body;
+    },
   };
 }
 

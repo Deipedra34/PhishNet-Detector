@@ -231,3 +231,60 @@ body {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+
+.page-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.feed-meta {
+  margin: 16px 0;
+}
+
+.feed-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 16px;
+}
+
+.feed-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.state-badge {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.state-badge.tone-good {
+  background: rgba(52, 211, 153, 0.14);
+  color: #34d399;
+}
+
+.state-badge.tone-warning {
+  background: rgba(251, 191, 36, 0.14);
+  color: #fbbf24;
+}
+
+.state-badge.tone-critical {
+  background: rgba(244, 63, 94, 0.16);
+  color: #fb7185;
+}
+
+.state-badge.tone-neutral {
+  background: #1c2233;
+  color: var(--muted);
+}
+
+.feed-error {
+  color: #fda4af;
+  overflow-wrap: anywhere;
+}
