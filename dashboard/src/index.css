@@ -108,3 +108,21 @@ body {
 .risk-pill.risk-high {
   color: #f43f5e;
 }
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.filter {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.filter input {
+  min-width: 260px;
+}
