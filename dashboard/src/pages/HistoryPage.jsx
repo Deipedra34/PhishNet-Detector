@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { defaultClient, RISK_LEVELS } from "../api/client.js";
+import Pagination, { pageCount } from "../components/Pagination.jsx";
 import RiskBadge from "../components/RiskBadge.jsx";
 import { formatAgeDays, formatDateTime, formatNumber } from "../format.js";
 
@@ -13,14 +14,19 @@ export default function HistoryPage() {
   const target = searchParams.get("target") ?? "";
   const risk = searchParams.get("risk") ?? "";
   const type = searchParams.get("type") ?? "";
+  const page = Math.max(1, Number.parseInt(searchParams.get("page") ?? "1", 10) || 1);
 
   const [targetInput, setTargetInput] = useState(target);
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  /** Applies filter changes; any change other than the page itself starts again from page 1. */
   function updateParams(changes) {
     const next = new URLSearchParams(searchParams);
+    if (!("page" in changes)) {
+      next.delete("page");
+    }
     for (const [key, value] of Object.entries(changes)) {
       if (value) {
         next.set(key, value);
@@ -38,14 +44,13 @@ export default function HistoryPage() {
     }
     const timer = setTimeout(() => updateParams({ target: targetInput.trim() }), SEARCH_DELAY_MS);
     return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targetInput]);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     defaultClient()
-      .history({ limit: PAGE_SIZE, target, risk, type })
+      .history({ limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE, target, risk, type })
       .then((body) => {
         if (!cancelled) {
           setData(body);
@@ -65,7 +70,19 @@ export default function HistoryPage() {
     return () => {
       cancelled = true;
     };
-  }, [target, risk, type]);
+  }, [target, risk, type, page]);
+
+  // A page past the end (e.g. after scans were removed, or a stale bookmark): go to the last one.
+  useEffect(() => {
+    if (data && data.total > 0 && data.scans.length === 0 && page > pageCount(data.total, PAGE_SIZE)) {
+      updateParams({ page: String(pageCount(data.total, PAGE_SIZE)) });
+    }
+  }, [data, page]);
+
+  function goToPage(next) {
+    updateParams({ page: next > 1 ? String(next) : "" });
+    window.scrollTo?.({ top: 0 });
+  }
 
   const filtered = Boolean(target || risk || type);
 
@@ -130,6 +147,7 @@ export default function HistoryPage() {
             {formatNumber(data.total)} {filtered ? "matching scans" : "scans recorded"}
           </p>
           <HistoryTable scans={data.scans} loading={loading} filtered={filtered} />
+          <Pagination page={page} pageSize={PAGE_SIZE} total={data.total} onPageChange={goToPage} disabled={loading} />
         </>
       ) : loading ? (
         <p className="muted">Loading...</p>

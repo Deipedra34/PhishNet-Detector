@@ -126,3 +126,16 @@ body {
 .filter input {
   min-width: 260px;
 }
+
+.pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.pagination-status {
+  padding: 0 8px;
+  font-variant-numeric: tabular-nums;
+}
