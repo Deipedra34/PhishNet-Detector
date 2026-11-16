@@ -58,3 +58,53 @@ body {
 .muted {
   color: var(--muted);
 }
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.data-table th,
+.data-table td {
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.data-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+.target-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 480px;
+  overflow-wrap: anywhere;
+}
+
+.risk-pill {
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.risk-pill.risk-low {
+  color: #34d399;
+}
+
+.risk-pill.risk-medium {
+  color: #fbbf24;
+}
+
+.risk-pill.risk-high {
+  color: #f43f5e;
+}

@@ -200,6 +200,20 @@ export function createApiClient({ baseUrl = "", fetchImpl } = {}) {
       form.append("file", file, file.name || "upload.eml");
       return checkScanResult(await request("/api/scan/email", { method: "POST", body: form }, SCAN_TIMEOUT_MS));
     },
+
+    /**
+     * `GET /api/history`: one page of past scans, newest first.
+     *
+     * @param {{limit?: number, offset?: number, target?: string, risk?: string, type?: string}} [params]
+     * @returns {Promise<{total: number, limit: number, offset: number, scans: object[]}>}
+     */
+    async history(params = {}) {
+      const body = await getJson("/api/history", params);
+      if (!Array.isArray(body.scans)) {
+        throw new ApiError("invalid", `${where} answered, but not with a PhishNet scan history.`);
+      }
+      return body;
+    },
   };
 }
 
