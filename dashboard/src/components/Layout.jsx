@@ -1,4 +1,4 @@
-import { NavLink, Outlet } from "react-router-dom";
+import { Link, NavLink, Outlet } from "react-router-dom";
 import ApiSettings from "./ApiSettings.jsx";
 
 const NAV_ITEMS = [
@@ -12,9 +12,18 @@ export default function Layout() {
   return (
     <div className="app">
       <header className="app-header">
-        <span className="brand">
-          Phish<span className="brand-accent">Net</span> Dashboard
-        </span>
+        <Link to="/" className="brand" aria-label="PhishNet Dashboard home">
+          <svg className="brand-mark" viewBox="0 0 64 64" aria-hidden="true">
+            <g fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="8" y="12" width="48" height="32" rx="5" />
+              <path d="M8 17 L32 34 L56 17" />
+              <path d="M32 44 L32 52 C32 59 43 59 43 52" />
+            </g>
+          </svg>
+          <span>
+            Phish<span className="brand-accent">Net</span> <span className="brand-suffix">Dashboard</span>
+          </span>
+        </Link>
         <nav className="app-nav" aria-label="Main">
           {NAV_ITEMS.map((item) => (
             <NavLink key={item.to} to={item.to} end={item.end}>
