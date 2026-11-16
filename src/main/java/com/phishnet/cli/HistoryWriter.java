@@ -101,7 +101,7 @@ public final class HistoryWriter {
         synchronized (APPEND_LOCK) {
             try (FileChannel channel = FileChannel.open(file, StandardOpenOption.CREATE, StandardOpenOption.WRITE,
                     StandardOpenOption.APPEND);
-                 FileLock lock = channel.lock()) {
+                 FileLock _ = channel.lock()) {
                 // Checked under the lock, so only the first of several concurrent writers adds the header.
                 String text = (channel.size() == 0 ? HEADER + "\n" : "") + row + "\n";
                 ByteBuffer bytes = ByteBuffer.wrap(text.getBytes(StandardCharsets.UTF_8));
