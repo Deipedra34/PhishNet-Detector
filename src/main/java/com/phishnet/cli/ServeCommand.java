@@ -99,6 +99,11 @@ final class ServeCommand implements Callable<Integer> {
                     + "The old key stops working; give the new one to every client.")
     private boolean regenerateKey;
 
+    @Option(names = "--rate-limit", paramLabel = "<requests-per-minute>",
+            description = "Scan requests each client IP may make per minute before getting 429 Too Many Requests "
+                    + "(default: api.rateLimitPerMinute from the config, 60; 0 turns it off)")
+    private Integer rateLimit;
+
     @Option(names = "--no-auth",
             description = "Don't require an API key: anyone who can reach this port can scan and read the scan "
                     + "history. Meant for local development only.")
@@ -137,6 +142,10 @@ final class ServeCommand implements Callable<Integer> {
         if (port < 0 || port > 65535) {
             throw new ParameterException(spec.commandLine(),
                     "Invalid value for option '--port': " + port + " is not a valid port (0-65535)");
+        }
+        if (rateLimit != null && rateLimit < 0) {
+            throw new ParameterException(spec.commandLine(),
+                    "Invalid value for option '--rate-limit': " + rateLimit + " (must be 0 or more)");
         }
         if (noAuth && regenerateKey) {
             throw new ParameterException(spec.commandLine(),
@@ -198,7 +207,8 @@ final class ServeCommand implements Callable<Integer> {
                 .withHistory(historyReader)
                 .withFeeds(threatFeeds.apply(config.threatFeeds().withEnvironment(System.getenv())))
                 .withDashboard(dashboard)
-                .withApiKey(apiKey == null ? null : apiKey.key());
+                .withApiKey(apiKey == null ? null : apiKey.key())
+                .withRateLimit(effectiveRateLimit(config));
         try {
             server.start(port);
         } catch (RuntimeException e) {
@@ -219,6 +229,10 @@ final class ServeCommand implements Callable<Integer> {
             out.println("Recording scans to " + history.file());
         }
         printApiKey(apiKey, server.port());
+        int limit = effectiveRateLimit(config);
+        out.println(limit > 0
+                ? "Rate limit: " + limit + " scan requests per minute per client"
+                : "Rate limit: off");
         if (dashboard != null) {
             out.println("Web dashboard: http://localhost:" + server.port() + "/ (from " + dashboard.toAbsolutePath()
                     + ")");
@@ -227,6 +241,11 @@ final class ServeCommand implements Callable<Integer> {
                     + "(build it with: cd dashboard && npm install && npm run build)");
         }
         return 0;
+    }
+
+    /** --rate-limit if given, else the config's api.rateLimitPerMinute. */
+    private int effectiveRateLimit(PhishNetConfig config) {
+        return rateLimit != null ? rateLimit : config.api().rateLimitPerMinute();
     }
 
     /** Shows a newly generated key once, in full; otherwise only says where the key comes from. */

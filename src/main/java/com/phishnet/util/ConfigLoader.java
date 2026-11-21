@@ -2,6 +2,7 @@ package com.phishnet.util;
 
 import com.phishnet.feeds.FeedUrls;
 import com.phishnet.feeds.ThreatFeedSettings;
+import com.phishnet.model.ApiSettings;
 import com.phishnet.model.PhishNetConfig;
 import com.phishnet.model.PhishNetConfig.ScoringConfig;
 import org.yaml.snakeyaml.Yaml;
@@ -103,8 +104,10 @@ public final class ConfigLoader {
                 domainAgeNewDays, domainAgeRecentDays);
 
         ThreatFeedSettings threatFeeds = threatFeeds(mapValue(root.get("threatFeeds")), urlShorteners);
+        ApiSettings api = new ApiSettings(intValue(mapValue(root.get("api")).get("rateLimitPerMinute"),
+                ApiSettings.DEFAULT_RATE_LIMIT_PER_MINUTE));
 
-        return new PhishNetConfig(brands, suspiciousTlds, urlShorteners, urgencyKeywords, scoring, threatFeeds);
+        return new PhishNetConfig(brands, suspiciousTlds, urlShorteners, urgencyKeywords, scoring, threatFeeds, api);
     }
 
     /**

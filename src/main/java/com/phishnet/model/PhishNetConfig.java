@@ -21,6 +21,7 @@ public final class PhishNetConfig {
     private final Map<String, List<String>> urgencyKeywords;
     private final ScoringConfig scoring;
     private final ThreatFeedSettings threatFeeds;
+    private final ApiSettings api;
 
     /** A config with the default threat feed settings ({@link ThreatFeedSettings#defaults()}). */
     public PhishNetConfig(List<String> brands, List<String> suspiciousTlds, List<String> urlShorteners,
@@ -31,12 +32,19 @@ public final class PhishNetConfig {
     public PhishNetConfig(List<String> brands, List<String> suspiciousTlds, List<String> urlShorteners,
                            Map<String, List<String>> urgencyKeywords, ScoringConfig scoring,
                            ThreatFeedSettings threatFeeds) {
+        this(brands, suspiciousTlds, urlShorteners, urgencyKeywords, scoring, threatFeeds, ApiSettings.defaults());
+    }
+
+    public PhishNetConfig(List<String> brands, List<String> suspiciousTlds, List<String> urlShorteners,
+                           Map<String, List<String>> urgencyKeywords, ScoringConfig scoring,
+                           ThreatFeedSettings threatFeeds, ApiSettings api) {
         this.brands = Collections.unmodifiableList(brands);
         this.suspiciousTlds = Collections.unmodifiableList(suspiciousTlds);
         this.urlShorteners = Collections.unmodifiableList(urlShorteners);
         this.urgencyKeywords = Collections.unmodifiableMap(urgencyKeywords);
         this.scoring = scoring;
         this.threatFeeds = threatFeeds;
+        this.api = api;
     }
 
     public List<String> brands() {
@@ -62,6 +70,11 @@ public final class PhishNetConfig {
     /** How the OpenPhish/PhishTank feeds are downloaded, cached, and matched. */
     public ThreatFeedSettings threatFeeds() {
         return threatFeeds;
+    }
+
+    /** REST API settings ({@code phishnet serve}): the rate limit. */
+    public ApiSettings api() {
+        return api;
     }
 
     /** A reasonable, self-contained configuration used as a fallback and in tests. */

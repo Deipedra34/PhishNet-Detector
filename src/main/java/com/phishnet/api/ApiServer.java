@@ -113,6 +113,8 @@ public final class ApiServer {
     private Path dashboardDirectory;
     /** SHA-256 of the required API key, or {@code null} when no key is required. */
     private byte[] apiKeyDigest;
+    /** Limits scan requests per client, or {@code null} for no limit. */
+    private RateLimiter rateLimiter;
 
     /**
      * @param log where unexpected (500) errors are reported, with their stack trace
@@ -179,6 +181,22 @@ public final class ApiServer {
         return this;
     }
 
+    /**
+     * Limits each client (by IP address) to {@code requestsPerMinute} scan requests
+     * ({@code POST /api/scan/url}, {@code POST /api/scan/email}); 0 means no limit. Other
+     * endpoints are never limited. Must be called before {@link #start}.
+     */
+    public ApiServer withRateLimit(int requestsPerMinute) {
+        return withRateLimiter(requestsPerMinute > 0 ? new RateLimiter(requestsPerMinute) : null);
+    }
+
+    /** Same, with a ready-made limiter (lets tests control its clock); {@code null} for no limit. */
+    ApiServer withRateLimiter(RateLimiter limiter) {
+        requireNotStarted();
+        this.rateLimiter = limiter;
+        return this;
+    }
+
     /** Whether {@code directory} looks like a built dashboard (it has an index.html). */
     public static boolean isDashboardDirectory(Path directory) {
         return directory != null && Files.isRegularFile(directory.resolve(DASHBOARD_INDEX));
@@ -232,6 +250,8 @@ public final class ApiServer {
                 throw tooLarge();
             }
             requireApiKey(ctx);
+            // After the key check, so requests with a bad key don't use up a client's allowance.
+            enforceRateLimit(ctx);
         });
         config.routes.get("/api/health", ctx -> respond(ctx, HttpStatus.OK, Map.of("status", "ok")));
         config.routes.post("/api/scan/url", this::scanUrl);
@@ -358,6 +378,24 @@ public final class ApiServer {
             return MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 is missing from this Java runtime", e);
+        }
+    }
+
+    // --- rate limiting ----------------------------------------------------------------
+
+    /** The endpoints that are rate limited: the scans, which do the real work (WHOIS, parsing). */
+    static boolean isRateLimited(Context ctx) {
+        return ctx.method().name().equals("POST")
+                && (ctx.path().equals("/api/scan/url") || ctx.path().equals("/api/scan/email"));
+    }
+
+    private void enforceRateLimit(Context ctx) {
+        if (rateLimiter == null || !isRateLimited(ctx)) {
+            return;
+        }
+        if (!rateLimiter.tryAcquire(ctx.ip()).allowed()) {
+            throw new HttpResponseException(HttpStatus.TOO_MANY_REQUESTS.getCode(),
+                    HttpStatus.TOO_MANY_REQUESTS.getMessage());
         }
     }
 

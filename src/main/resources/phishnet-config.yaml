@@ -213,6 +213,14 @@ scoring:
   domainAgeNewDays: 30
   domainAgeRecentDays: 180
 
+# REST API (`phishnet serve`) settings.
+api:
+  # How many scan requests (POST /api/scan/url and /api/scan/email) each client IP
+  # may make per minute; beyond that the API answers 429 Too Many Requests. Bursts
+  # up to this number are allowed, and the allowance refills continuously. 0 turns
+  # rate limiting off. `phishnet serve --rate-limit <n>` overrides this.
+  rateLimitPerMinute: 60
+
 # Threat intelligence feeds of known phishing URLs, checked on every scan unless
 # --no-threat-feeds is given. Feeds are cached under ~/.phishnet/feeds; manage
 # them with `phishnet feeds update` and `phishnet feeds status`.
