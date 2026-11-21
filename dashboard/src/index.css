@@ -252,6 +252,7 @@ button:disabled {
 
 input[type="text"],
 input[type="search"],
+input[type="password"],
 select,
 textarea {
   width: 100%;
@@ -741,4 +742,45 @@ label {
   .bar-row {
     grid-template-columns: minmax(64px, 110px) 1fr auto;
   }
+}
+
+/* --- API key screen ------------------------------------------------------------ */
+
+.key-setup {
+  max-width: 560px;
+}
+
+.key-setup form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.key-setup label {
+  font-weight: 600;
+}
+
+.key-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.key-row input[type="password"],
+.key-row input[type="text"] {
+  flex: 1;
+  font-family: var(--mono);
+}
+
+.key-row .show-key {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: normal;
+  white-space: nowrap;
+}
+
+.key-setup button[type="submit"] {
+  align-self: flex-start;
 }

@@ -1,5 +1,6 @@
 import { Link, NavLink, Outlet } from "react-router-dom";
 import ApiSettings from "./ApiSettings.jsx";
+import AuthGate from "./AuthGate.jsx";
 
 const NAV_ITEMS = [
   { to: "/", label: "Scan", end: true },
@@ -33,7 +34,9 @@ export default function Layout() {
         </nav>
       </header>
       <main className="app-main">
-        <Outlet />
+        <AuthGate>
+          <Outlet />
+        </AuthGate>
       </main>
       <footer className="app-footer">
         <ApiSettings />

@@ -9,6 +9,18 @@
 /** localStorage key holding a base URL chosen in the dashboard's settings. */
 export const API_BASE_URL_KEY = "phishnet.apiBaseUrl";
 
+/** localStorage key holding the API key entered on the dashboard's key screen. */
+export const API_KEY_STORAGE_KEY = "phishnet.apiKey";
+
+/** Request header carrying the API key (`phishnet serve` 2.9.0 and newer require it). */
+export const API_KEY_HEADER = "X-API-Key";
+
+/** Window event fired when the server rejects the stored API key, so the key screen can come back. */
+export const UNAUTHORIZED_EVENT = "phishnet:unauthorized";
+
+/** Window event fired when the stored API key is saved or forgotten. */
+export const API_KEY_CHANGED_EVENT = "phishnet:api-key-changed";
+
 /** A scan can include a live WHOIS lookup on the server, which may take several seconds. */
 export const SCAN_TIMEOUT_MS = 30000;
 /** Reads (history, stats, feed status) only query local files on the server. */
@@ -77,17 +89,58 @@ export function setConfiguredBaseUrl(input) {
   return normalized;
 }
 
+/**
+ * Checks an API key typed by the user: surrounding spaces are dropped, blank means
+ * "no key", and anything that can't be sent in an HTTP header is rejected.
+ *
+ * @throws {Error} with a message that can be shown to the user as-is
+ */
+export function normalizeApiKey(input) {
+  const key = (input ?? "").trim();
+  if (key && !/^[\x21-\x7e]+$/.test(key)) {
+    throw new Error("The API key can't contain spaces or special characters - copy it exactly as printed.");
+  }
+  return key;
+}
+
+/** The API key saved in this browser, or "" when none is. */
+export function getStoredApiKey() {
+  try {
+    return globalThis.localStorage?.getItem(API_KEY_STORAGE_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/** Saves (or, with a blank value, forgets) the API key. Returns the normalized key. */
+export function setStoredApiKey(input) {
+  const key = normalizeApiKey(input);
+  try {
+    if (key) {
+      globalThis.localStorage?.setItem(API_KEY_STORAGE_KEY, key);
+    } else {
+      globalThis.localStorage?.removeItem(API_KEY_STORAGE_KEY);
+    }
+  } catch {
+    // Storage unavailable: the key just isn't remembered.
+  }
+  globalThis.dispatchEvent?.(new Event(API_KEY_CHANGED_EVENT));
+  return key;
+}
+
 /** A failed API call, with a message ready to show to the user. */
 export class ApiError extends Error {
   /**
-   * @param {"unreachable"|"timeout"|"http"|"invalid"} kind
-   * @param {number} [status] HTTP status, for kind "http"/"invalid"
+   * @param {"unreachable"|"timeout"|"http"|"invalid"|"auth"|"rate"} kind
+   * @param {number} [status] HTTP status, for kind "http"/"invalid"/"auth"/"rate"
+   * @param {number} [retryAfterSeconds] for kind "rate": the server's Retry-After
    */
-  constructor(kind, message, status) {
+  constructor(kind, message, status, retryAfterSeconds) {
     super(message);
     this.name = "ApiError";
     this.kind = kind;
     this.status = status;
+    this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 
@@ -108,11 +161,14 @@ export function buildQuery(params) {
  *
  * @param {object} [options]
  * @param {string} [options.baseUrl] API base URL; "" (the default) for same-origin relative paths
+ * @param {string} [options.apiKey] sent as the X-API-Key header on every request when set
+ * @param {() => void} [options.onUnauthorized] called when the server rejects the key (401)
  * @param {typeof fetch} [options.fetchImpl] fetch implementation (swapped out in tests)
  */
-export function createApiClient({ baseUrl = "", fetchImpl } = {}) {
+export function createApiClient({ baseUrl = "", apiKey = "", onUnauthorized, fetchImpl } = {}) {
   const base = normalizeBaseUrl(baseUrl);
   const where = base || "this server";
+  const authHeaders = apiKey ? { [API_KEY_HEADER]: apiKey } : {};
 
   async function request(path, init, timeoutMs) {
     const doFetch = fetchImpl ?? globalThis.fetch.bind(globalThis);
@@ -123,6 +179,7 @@ export function createApiClient({ baseUrl = "", fetchImpl } = {}) {
       try {
         response = await doFetch(base + path, {
           ...init,
+          headers: { ...init.headers, ...authHeaders },
           signal: controller.signal,
           credentials: "same-origin",
           cache: "no-store",
@@ -142,6 +199,16 @@ export function createApiClient({ baseUrl = "", fetchImpl } = {}) {
       }
       if (!response.ok) {
         // The PhishNet API always explains its errors as {"error": "..."}.
+        if (response.status === 401 && typeof body?.error === "string") {
+          onUnauthorized?.();
+          throw new ApiError("auth", apiKey
+            ? "The PhishNet API rejected the API key."
+            : "This PhishNet API requires an API key.", 401);
+        }
+        if (response.status === 429 && typeof body?.error === "string") {
+          const retryAfter = Number.parseInt(response.headers?.get?.("Retry-After") ?? "", 10);
+          throw new ApiError("rate", body.error, 429, Number.isFinite(retryAfter) ? retryAfter : undefined);
+        }
         if (typeof body?.error === "string") {
           throw new ApiError("http", body.error, response.status);
         }
@@ -179,9 +246,14 @@ export function createApiClient({ baseUrl = "", fetchImpl } = {}) {
   return {
     baseUrl: base,
 
-    /** `GET /api/health`; resolves to `{status: "ok"}`. */
+    /** `GET /api/health`; resolves to `{status: "ok"}`. Needs no API key. */
     health() {
       return getJson("/api/health");
+    },
+
+    /** `GET /api/auth/check`: resolves when the server accepts this client's API key (or needs none). */
+    authCheck() {
+      return getJson("/api/auth/check");
     },
 
     /** `POST /api/scan/url`. */
@@ -240,7 +312,16 @@ export function createApiClient({ baseUrl = "", fetchImpl } = {}) {
   };
 }
 
-/** A client for the base URL currently configured. */
+/** Tells the dashboard (its AuthGate) that the stored API key was rejected. */
+export function notifyUnauthorized() {
+  globalThis.dispatchEvent?.(new Event(UNAUTHORIZED_EVENT));
+}
+
+/** A client for the base URL and API key currently configured. */
 export function defaultClient() {
-  return createApiClient({ baseUrl: getConfiguredBaseUrl() });
+  return createApiClient({
+    baseUrl: getConfiguredBaseUrl(),
+    apiKey: getStoredApiKey(),
+    onUnauthorized: notifyUnauthorized,
+  });
 }

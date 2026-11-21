@@ -1,19 +1,26 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   API_BASE_URL_KEY,
+  API_KEY_STORAGE_KEY,
   ApiError,
+  UNAUTHORIZED_EVENT,
   buildQuery,
   createApiClient,
+  defaultClient,
   getConfiguredBaseUrl,
+  getStoredApiKey,
+  normalizeApiKey,
   normalizeBaseUrl,
   setConfiguredBaseUrl,
+  setStoredApiKey,
 } from "./client.js";
 
-/** A fetch stand-in answering with `status` and a JSON body, recording each call. */
-function fakeFetch(status, body) {
+/** A fetch stand-in answering with `status`, a JSON body, and optional headers, recording each call. */
+function fakeFetch(status, body, headers = {}) {
   return vi.fn(async () => ({
     ok: status >= 200 && status < 300,
     status,
+    headers: { get: (name) => headers[name] ?? null },
     json: async () => body,
   }));
 }
@@ -163,6 +170,93 @@ describe("createApiClient", () => {
     await expect(createApiClient({ fetchImpl }).health()).rejects.toMatchObject({
       kind: "unreachable",
       message: expect.stringContaining("phishnet serve"),
+    });
+  });
+});
+
+describe("API key", () => {
+  const UNAUTHORIZED = { error: "Missing or invalid API key." };
+
+  it("is stored in localStorage, trimmed, and forgotten when blank", () => {
+    expect(getStoredApiKey()).toBe("");
+    expect(setStoredApiKey("  abc123-key  ")).toBe("abc123-key");
+    expect(localStorage.getItem(API_KEY_STORAGE_KEY)).toBe("abc123-key");
+    expect(getStoredApiKey()).toBe("abc123-key");
+
+    setStoredApiKey("");
+    expect(localStorage.getItem(API_KEY_STORAGE_KEY)).toBeNull();
+  });
+
+  it("rejects keys that can't be sent in a header", () => {
+    expect(normalizeApiKey(" ok-key ")).toBe("ok-key");
+    expect(() => normalizeApiKey("has space")).toThrow(/spaces/);
+    expect(() => normalizeApiKey("tab\tkey")).toThrow();
+  });
+
+  it("is sent as X-API-Key on every request, alongside other headers", async () => {
+    const fetchImpl = fakeFetch(200, SCAN_RESULT);
+    const client = createApiClient({ apiKey: "s3cret-key", fetchImpl });
+
+    await client.scanUrl("http://paypa1.tk/login");
+    expect(fetchImpl.mock.calls[0][1].headers).toEqual({
+      "Content-Type": "application/json",
+      "X-API-Key": "s3cret-key",
+    });
+
+    const file = new File(["From: a@b.c\n\nhello"], "x.eml");
+    await client.scanEmailFile(file);
+    expect(fetchImpl.mock.calls[1][1].headers).toEqual({ "X-API-Key": "s3cret-key" });
+  });
+
+  it("is not sent when none is set", async () => {
+    const fetchImpl = fakeFetch(200, { status: "ok" });
+    await createApiClient({ fetchImpl }).health();
+    expect(fetchImpl.mock.calls[0][1].headers).toEqual({});
+  });
+
+  it("defaultClient uses the stored key", async () => {
+    setStoredApiKey("stored-key-123");
+    const fetchImpl = fakeFetch(200, { status: "ok" });
+    vi.stubGlobal("fetch", fetchImpl);
+    try {
+      await defaultClient().authCheck();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(fetchImpl.mock.calls[0][0]).toBe("/api/auth/check");
+    expect(fetchImpl.mock.calls[0][1].headers).toEqual({ "X-API-Key": "stored-key-123" });
+  });
+
+  it("turns 401 into an auth error and calls onUnauthorized", async () => {
+    const onUnauthorized = vi.fn();
+    const withKey = createApiClient({ apiKey: "wrong-key", onUnauthorized, fetchImpl: fakeFetch(401, UNAUTHORIZED) });
+    await expect(withKey.history()).rejects.toMatchObject({ kind: "auth", status: 401, message: /rejected/ });
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+
+    const withoutKey = createApiClient({ fetchImpl: fakeFetch(401, UNAUTHORIZED) });
+    await expect(withoutKey.history()).rejects.toMatchObject({ kind: "auth", message: /requires an API key/ });
+  });
+
+  it("defaultClient announces a rejected key with a window event", async () => {
+    const listener = vi.fn();
+    window.addEventListener(UNAUTHORIZED_EVENT, listener);
+    vi.stubGlobal("fetch", fakeFetch(401, UNAUTHORIZED));
+    try {
+      await expect(defaultClient().historyStats()).rejects.toBeInstanceOf(ApiError);
+    } finally {
+      vi.unstubAllGlobals();
+      window.removeEventListener(UNAUTHORIZED_EVENT, listener);
+    }
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it("turns 429 into a rate error with the server's message and Retry-After", async () => {
+    const fetchImpl = fakeFetch(429, { error: "Too many scan requests: try again in 12 seconds." }, { "Retry-After": "12" });
+    await expect(createApiClient({ fetchImpl }).scanUrl("http://x.tk")).rejects.toMatchObject({
+      kind: "rate",
+      status: 429,
+      retryAfterSeconds: 12,
+      message: "Too many scan requests: try again in 12 seconds.",
     });
   });
 });

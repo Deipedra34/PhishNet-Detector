@@ -1,5 +1,13 @@
-import { useState } from "react";
-import { createApiClient, getConfiguredBaseUrl, normalizeBaseUrl, setConfiguredBaseUrl } from "../api/client.js";
+import { useEffect, useState } from "react";
+import {
+  API_KEY_CHANGED_EVENT,
+  createApiClient,
+  getConfiguredBaseUrl,
+  getStoredApiKey,
+  normalizeBaseUrl,
+  setConfiguredBaseUrl,
+  setStoredApiKey,
+} from "../api/client.js";
 
 /**
  * Footer control for the API address. Blank (the default) means "the server this
@@ -11,6 +19,14 @@ export default function ApiSettings() {
   const [value, setValue] = useState(current);
   const [message, setMessage] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [hasKey, setHasKey] = useState(() => Boolean(getStoredApiKey()));
+
+  // The key screen can save a key after this footer has rendered.
+  useEffect(() => {
+    const update = () => setHasKey(Boolean(getStoredApiKey()));
+    window.addEventListener(API_KEY_CHANGED_EVENT, update);
+    return () => window.removeEventListener(API_KEY_CHANGED_EVENT, update);
+  }, []);
 
   async function save(event) {
     event.preventDefault();
@@ -40,6 +56,11 @@ export default function ApiSettings() {
     window.location.reload();
   }
 
+  function forgetKey() {
+    setStoredApiKey("");
+    window.location.reload();
+  }
+
   if (!editing) {
     return (
       <div className="api-settings">
@@ -49,6 +70,11 @@ export default function ApiSettings() {
         <button type="button" className="link-button" onClick={() => setEditing(true)}>
           Change
         </button>
+        {hasKey ? (
+          <button type="button" className="link-button" onClick={forgetKey}>
+            Forget API key
+          </button>
+        ) : null}
       </div>
     );
   }
