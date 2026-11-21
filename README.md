@@ -1084,9 +1084,15 @@ PhishNet API listening on http://localhost:8080 (Ctrl+C to stop)
   GET  /api/history
   GET  /api/history/stats
   GET  /api/feeds/status
+  GET  /api/auth/check
 Recording scans to /home/alice/.phishnet/phishnet-history.db
+API key required (X-API-Key header): from /home/alice/.phishnet/api-key
+Rate limit: 60 scan requests per minute per client
 Web dashboard: http://localhost:8080/ (from /home/alice/PhishNet-Detector/dashboard/dist)
 ```
+
+(The very first start generates the API key and prints it in full instead -
+see [Authentication and rate limiting](#authentication-and-rate-limiting).)
 
 | Option | Meaning |
 | --- | --- |
@@ -1097,22 +1103,127 @@ Web dashboard: http://localhost:8080/ (from /home/alice/PhishNet-Detector/dashbo
 | `--no-history-db` | Don't record API scans in the scan history database (the read-only history endpoints still read it) |
 | `--dashboard <dir>` | Serve the built [web dashboard](#web-dashboard) from this directory (default: found automatically, see below) |
 | `--no-dashboard` | Serve the REST API only, even if the dashboard has been built |
+| `--api-key-file <path>` | Where the API key is kept (default `~/.phishnet/api-key`, created with a new random key on first run); `PHISHNET_API_KEY`, when set, is used instead |
+| `--regenerate-key` | Replace the API key with a new one (printed once) before starting; the old key stops working |
+| `--no-auth` | Don't require an API key - every endpoint is open to anyone who can reach the port. Local development only |
+| `--rate-limit <n>` | Scan requests each client IP may make per minute (default `api.rateLimitPerMinute` from the config, `60`; `0` turns it off) |
 
 The server runs until stopped with Ctrl+C (or SIGTERM), which shuts it down
-cleanly. Exit code `2` means a bad option (e.g. an out-of-range port), `1`
-means the config couldn't be loaded, the port couldn't be bound, or
-`--dashboard` points at a directory without an `index.html`.
+cleanly. Exit code `2` means a bad option (e.g. an out-of-range port, a negative
+`--rate-limit`, or `--no-auth` together with `--regenerate-key`), `1` means the
+config couldn't be loaded, the API key couldn't be read or written, the port
+couldn't be bound, or `--dashboard` points at a directory without an
+`index.html`.
+
+### Authentication and rate limiting
+
+Since version 2.9.0 the API is **secure by default**: every endpoint except
+`GET /api/health` requires an API key, and scan requests are rate limited.
+
+**The API key.** The first time `phishnet serve` starts, it generates a random
+key (256 bits), saves it to `~/.phishnet/api-key` (next to the scan history; on
+Linux/macOS the file is readable by its owner only), and prints it once:
+
+```
+Generated a new API key and saved it to /home/alice/.phishnet/api-key:
+
+    Zr4nE8vQx1Lk9wTb2yHc7uJm5sPa3dGf6oKi0eNqW-A
+
+Clients (the browser extension, the web dashboard, scripts) must send it in the X-API-Key header.
+It is shown only this once; to see it again, read that file. To replace it: phishnet serve --regenerate-key
+```
+
+Later runs reuse that key and only say where it comes from. Send it in the
+`X-API-Key` header:
+
+```bash
+API_KEY=$(cat ~/.phishnet/api-key)
+curl -H "X-API-Key: $API_KEY" http://localhost:8080/api/history
+```
+
+- **Find it again** by reading `~/.phishnet/api-key` on the server.
+- **Replace it** with `phishnet serve --regenerate-key`, which writes and prints
+  a new key, then starts the server. The old key stops working at once, so give
+  the new one to every client (extension, dashboard, scripts).
+- **Supply your own** in the `PHISHNET_API_KEY` environment variable (16-256
+  characters, no spaces) - handy for containers. It's used instead of the key
+  file, and nothing is written. `--api-key-file <path>` keeps the key file
+  somewhere else, e.g. for two servers on one machine.
+- **Turn it off** with `--no-auth`, for local development only: every endpoint
+  is then open to anyone who can reach the port, and the server prints a
+  warning saying so at every start.
+
+A missing or wrong key gets `401 Unauthorized` and the same JSON error either
+way, so a near miss can't be told apart from a guess. Keys are compared in
+constant time:
+
+```bash
+$ curl -i -X POST http://localhost:8080/api/scan/url -H "Content-Type: application/json" -d '{"url": "https://example.com"}'
+HTTP/1.1 401 Unauthorized
+...
+{"error":"Missing or invalid API key. Send the key that 'phishnet serve' printed in the X-API-Key header (by default it is stored in ~/.phishnet/api-key)."}
+```
+
+`GET /api/auth/check` answers `{"status":"ok"}` when the request's key is
+accepted (and 401 when it isn't) - clients use it to test a key, since
+`/api/health` is open to everyone.
+
+**Rate limiting.** Each client (by IP address) may make **60 scan requests per
+minute** by default (`POST /api/scan/url` and `POST /api/scan/email` together).
+Bursts up to the limit are fine, and the allowance refills continuously. A
+request over the limit gets `429 Too Many Requests` with a `Retry-After` header
+(seconds until the next scan is allowed) and a JSON error:
+
+```bash
+HTTP/1.1 429 Too Many Requests
+Retry-After: 1
+...
+{"error":"Too many scan requests: the limit is 60 per minute per client. Try again in 1 second."}
+```
+
+Set the limit with `--rate-limit <requests-per-minute>`, or in the config's
+`api` section (`--rate-limit` wins); `0` turns it off:
+
+```yaml
+api:
+  rateLimitPerMinute: 60
+```
+
+The read endpoints (history, stats, feeds), `/api/health`, and
+`/api/auth/check` aren't limited, and requests rejected for a bad key don't use
+up a client's allowance. The limiter is in-memory and per process - basic
+abuse protection for a self-hosted tool, not a distributed rate limiter. Behind
+a reverse proxy, every request comes from the proxy's address, so all clients
+share one allowance; raise the limit (or limit at the proxy) in that setup.
+
+**Upgrading from an earlier version.** After upgrading, the first
+`phishnet serve` generates a key, and clients without it get 401. Copy the key
+from the startup output (or `~/.phishnet/api-key`, or make a new one with
+`--regenerate-key`), then:
+
+- **Browser extension:** paste it into the new **API key** field in its
+  Settings (see [browser-extension/README.md](browser-extension/README.md)).
+- **Web dashboard:** it asks for the key on its next load; paste it once and
+  it's remembered in that browser.
+- **Scripts:** add `-H "X-API-Key: ..."` to each request.
+
+To keep the old open behavior on a trusted local setup instead, start the
+server with `--no-auth`.
 
 ### Endpoints
 
+Every endpoint except `/api/health` needs the `X-API-Key` header (unless the
+server runs with `--no-auth`); the examples below use `$API_KEY` for it.
+
 | Method | Path | Request | Response |
 | --- | --- | --- | --- |
-| `GET` | `/api/health` | - | `{"status":"ok"}` |
+| `GET` | `/api/health` | - (no API key needed) | `{"status":"ok"}` |
 | `POST` | `/api/scan/url` | JSON `{"url": "..."}` | URL scan result |
 | `POST` | `/api/scan/email` | multipart upload of a `.eml` file in form field `file`, **or** JSON `{"raw": "<full email source>"}` | email scan result |
 | `GET` | `/api/history` | query `limit`, `offset`, `target`, `risk`, `type` (all optional) | one page of past scans, newest first (read-only) |
 | `GET` | `/api/history/stats` | query `top` (optional) | the `phishnet history stats` figures |
 | `GET` | `/api/feeds/status` | - | the `phishnet feeds status` figures |
+| `GET` | `/api/auth/check` | - | `{"status":"ok"}` if the API key is accepted (401 if not) |
 
 Every scan result has the same core fields as the CLI's `--json` output -
 `target`, `score` (0-100), `level` (`LOW`/`MEDIUM`/`HIGH`), `recommendation`,
@@ -1142,6 +1253,7 @@ curl http://localhost:8080/api/health
 
 ```bash
 curl -X POST http://localhost:8080/api/scan/url \
+  -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"url": "http://paypa1-secure-login.tk/verify?redirect=http://evil.tk/x"}'
 ```
@@ -1185,6 +1297,7 @@ With a successful WHOIS lookup, `domainAge` carries the registration details:
 
 ```bash
 curl -X POST http://localhost:8080/api/scan/url \
+  -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"url": "https://github.com/login"}'
 ```
@@ -1212,6 +1325,7 @@ curl -X POST http://localhost:8080/api/scan/url \
 
 ```bash
 curl -X POST http://localhost:8080/api/scan/email \
+  -H "X-API-Key: $API_KEY" \
   -F "file=@suspicious.eml"
 ```
 
@@ -1244,6 +1358,7 @@ curl -X POST http://localhost:8080/api/scan/email \
 
 ```bash
 curl -X POST http://localhost:8080/api/scan/email \
+  -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"raw": "From: \"PayPal\" <alert@random-mailer.info>\nTo: victim@example.com\nSubject: Verify immediately\n\nYour account will be suspended. Verify immediately: http://192.168.1.1/login\n"}'
 ```
@@ -1308,7 +1423,7 @@ and a database that doesn't exist yet just reads as empty.
 | `type` | `URL` or `EMAIL` (any case) |
 
 ```bash
-curl "http://localhost:8080/api/history?risk=high&target=paypa&limit=1"
+curl -H "X-API-Key: $API_KEY" "http://localhost:8080/api/history?risk=high&target=paypa&limit=1"
 ```
 
 ```json
@@ -1394,13 +1509,15 @@ details and stack traces are only ever written to the server's own log
 | Status | When |
 | --- | --- |
 | `200` | Scan completed (whatever the risk level), or a history/stats/feed status read |
+| `401` | Missing or invalid API key (`X-API-Key` header) - every endpoint except `/api/health` |
+| `429` | Too many scan requests from this client; `Retry-After` says how many seconds to wait |
 | `400` | Missing, empty, or malformed input: empty body, invalid JSON, a body that isn't a JSON object, missing/empty/non-string `url` or `raw`, a URL over 8192 characters, a multipart request without a `file` field, an empty uploaded file, or an unreadable multipart body; for the history endpoints, a `limit`/`offset`/`top` that isn't a whole number in range, or an unknown `risk`/`type` |
 | `404` / `405` | Unknown path, or wrong HTTP method for a known path |
 | `413` | Request body larger than 5 MB |
 | `500` | Unexpected internal failure (`{"error": "Internal server error"}`), or an unreadable history database |
 
 ```bash
-$ curl -i -X POST http://localhost:8080/api/scan/url -H "Content-Type: application/json" -d '{}'
+$ curl -i -X POST http://localhost:8080/api/scan/url -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" -d '{}'
 HTTP/1.1 400 Bad Request
 ...
 {"error":"Missing required field 'url'"}
@@ -1415,14 +1532,17 @@ Notes:
   `--no-history-db` is given), so they show up in `phishnet history` alongside
   CLI scans. WHOIS results are looked up fresh for each request rather than
   cached across requests.
-- There is no authentication, and the server listens on all network
-  interfaces. Keep it on a trusted network, or put it behind a reverse proxy
-  that handles TLS and access control before exposing it more widely.
+- The server listens on all network interfaces, over plain HTTP. The API key
+  keeps out anyone who doesn't have it, but it travels in clear text, so anyone
+  who can watch the traffic can read it. Keep the server on a trusted network,
+  or put it behind a reverse proxy that adds TLS before exposing it more widely.
 - Cross-origin (CORS) access is granted to **browser-extension pages only**
   (`chrome-extension://...` and `moz-extension://...` origins), so the
   [browser extension](#browser-extension) can call the API. Those requests get
-  an `Access-Control-Allow-Origin` header echoing their origin, and their
-  `OPTIONS` preflight is answered with `204`. Ordinary websites get no CORS
+  an `Access-Control-Allow-Origin` header echoing their origin (and may read
+  `Retry-After`), and their `OPTIONS` preflight - which needs no API key, since
+  browsers never send one there - is answered with `204` and allows the
+  `X-API-Key` header. Ordinary websites get no CORS
   headers - a page open in your browser can't read results from a server on
   your machine - and every other response is unchanged. The
   [web dashboard](#web-dashboard) is served from the API's own origin, so it
@@ -1473,6 +1593,12 @@ java -jar target/phishnet.jar serve
 # Web dashboard: http://localhost:8080/ (from .../dashboard/dist)
 ```
 
+On its first load in a browser, the dashboard asks for the
+[API key](#authentication-and-rate-limiting) that `phishnet serve` printed, checks it
+against the server, and remembers it in that browser's local storage. **Forget API
+key** in the footer removes it; if the key is replaced on the server, the dashboard
+asks again. Against a server started with `--no-auth`, it doesn't ask at all.
+
 Without `--dashboard`, `phishnet serve` serves the first of these that has an
 `index.html`: the directory in `PHISHNET_DASHBOARD_DIR`, `./dashboard/dist`, or a
 `dashboard/` folder next to `phishnet.jar`. If there's none, it serves the API only,
@@ -1493,6 +1619,9 @@ The dev server reloads on every edit and proxies `/api/...` to the API (set
 java -jar target/phishnet.jar serve       # terminal 1
 cd dashboard && npm run dev               # terminal 2: http://localhost:5173
 ```
+
+The dev server forwards the `X-API-Key` header like any other, so the dashboard
+asks for the key there too.
 
 `npm test` runs the dashboard's unit tests (Vitest). See
 [dashboard/README.md](dashboard/README.md) for the full setup, the build options,
@@ -1905,6 +2034,26 @@ docker run -d --name phishnet-api -p 9090:8080 ghcr.io/deipedra34/phishnet-detec
 curl http://localhost:8080/api/health
 ```
 
+The API key works the same as outside Docker. On first start the container
+generates one, saves it to `/home/phishnet/.phishnet/api-key`, and prints it - see
+it with `docker logs phishnet-api`. Keep that directory in a volume (as below) so
+the key survives `--rm` and restarts; without one, every new container makes a new
+key. Alternatively pass your own with `-e PHISHNET_API_KEY` (copied from your shell):
+
+```bash
+export PHISHNET_API_KEY='your-long-random-key'
+docker run -d --name phishnet-api -p 8080:8080 -e PHISHNET_API_KEY \
+  ghcr.io/deipedra34/phishnet-detector serve
+
+# Read the key generated in the volume, or replace it
+docker exec phishnet-api cat /home/phishnet/.phishnet/api-key
+docker run --rm -it -p 8080:8080 -v phishnet-history:/home/phishnet/.phishnet \
+  ghcr.io/deipedra34/phishnet-detector serve --regenerate-key
+```
+
+`--rate-limit <n>` and `--no-auth` work as described in
+[Authentication and rate limiting](#authentication-and-rate-limiting).
+
 The image includes the built [web dashboard](#web-dashboard) (in
 `/opt/phishnet/dashboard`, found through `PHISHNET_DASHBOARD_DIR`), so in serve mode
 `http://localhost:8080/` opens it, on the same port as the API. Mount the history
@@ -2110,7 +2259,7 @@ or empty sections (brands, TLDs, weights).
 `mvn test` runs [JaCoCo](https://www.jacoco.org/jacoco/) automatically and
 generates an HTML report at `target/site/jacoco/index.html` - open that file
 in a browser for a line-by-line, package-by-package breakdown. The suite
-(700 tests as of this writing) maintains roughly **90% line / 80% branch**
+(744 tests as of this writing) maintains roughly **90% line / 80% branch**
 coverage overall; the biggest remaining gaps are `SslChecker`'s real-socket
 TLS handshake path and `SocketWhoisClient`'s port-43 I/O, which by design
 aren't exercised without a live network connection (the certificate-decision
@@ -2146,7 +2295,7 @@ src/main/java/com/phishnet/
   ml/         FeatureVector, FeatureExtractor, LogisticRegression, TrainingData, MlModel, MlScorer, MlPrediction (experimental ML layer)
   feeds/      ThreatFeedService, ThreatFeedIndex, FeedCache, FeedParser, FeedUrls, HttpFeedFetcher, ThreatFeedSettings (threat intelligence feeds)
   mail/       MailMonitorService, MailSource, ImapMailSource, Pop3MailSource, MessageConverter, MonitorActions, Backoff, MailServerSettings (mailbox monitoring)
-  api/        ApiServer (Javalin routes, validation, JSON errors, dashboard static files), ScanService (analyzer/scorer wrapper), HistoryApi and FeedsApi (read-only dashboard endpoints)
+  api/        ApiServer (Javalin routes, validation, JSON errors, API key check, dashboard static files), ScanService (analyzer/scorer wrapper), HistoryApi and FeedsApi (read-only dashboard endpoints), ApiKeyStore (API key file), RateLimiter (per-client token bucket)
   util/       LevenshteinDistance, HomoglyphUtil, ConfigLoader, AnsiColor, ColorSupport
 src/main/resources/phishnet-config.yaml
 src/main/resources/training-data.csv  (bundled example dataset for the ML layer)

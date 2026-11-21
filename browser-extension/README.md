@@ -59,8 +59,21 @@ docker run --rm -p 8080:8080 ghcr.io/deipedra34/phishnet-detector serve --port 8
 ```
 
 Either way the API is then at `http://localhost:8080`, which is the
-extension's default - no settings change needed. Check it with
-`curl http://localhost:8080/api/health`.
+extension's default. Check it with `curl http://localhost:8080/api/health`.
+
+**Copy the API key it prints.** Since version 2.9.0, `phishnet serve` requires
+an API key on every scan. The first start generates one and prints it once:
+
+```
+Generated a new API key and saved it to /home/you/.phishnet/api-key:
+
+    Zr4nE8vQx1Lk9wTb2yHc7uJm5sPa3dGf6oKi0eNqW-A
+```
+
+You'll paste it into the extension's settings in step 3. Missed it? It's in
+`~/.phishnet/api-key` on the server (in Docker: `docker logs <container>`, or
+`docker exec <container> cat /home/phishnet/.phishnet/api-key`), and
+`phishnet serve --regenerate-key` makes a new one.
 
 ## 2. Load the extension
 
@@ -98,9 +111,19 @@ Right-click the toolbar icon → **Options** (Firefox: **Manage Extension** →
   - another machine or a container host on your network: `http://192.168.1.20:8080`
   - behind a reverse proxy: `https://phishnet.example.internal` (a path prefix
     such as `https://example.internal/phishnet` works too)
-- **Test connection** checks `GET /api/health` at the address in the box,
-  without saving it.
-- **Reset to default** goes back to `http://localhost:8080`.
+- **API key** - the key `phishnet serve` printed (see step 1). It's sent in
+  the `X-API-Key` header with every scan and kept in the browser's extension
+  storage. Tick **Show** to check what you pasted. Leave it empty for a server
+  started with `--no-auth`.
+- **Test connection** checks the address and the key in the boxes, without
+  saving them: `GET /api/health` to see the server answers, then
+  `GET /api/auth/check` to see it accepts the key. A server older than 2.9.0
+  has no API keys, and the test says so.
+- **Reset to default** goes back to `http://localhost:8080` (the key is kept).
+
+**Upgrading from an older PhishNet:** after the server is upgraded to 2.9.0
+or newer, scans fail with "PhishNet API requires an API key" until you paste
+the key here.
 
 When you save an address on a host other than `localhost` / `127.0.0.1`, the
 browser asks whether PhishNet may access that host. Allowing it is
@@ -111,7 +134,7 @@ recommended but not required - see the next section.
 | Permission | Why |
 | --- | --- |
 | `activeTab` | Read the current tab's address, only when you click the icon |
-| `storage` | Remember the API address |
+| `storage` | Remember the API address and API key |
 | host access to `localhost` and `127.0.0.1` | Call a local `phishnet serve` (any port) |
 | optional host access (`http://*/*`, `https://*/*`) | Asked for one host at a time, only when you save an API address on another host |
 
@@ -154,8 +177,10 @@ One manifest works in both. The browser-specific bits:
 | … didn't answer within 20 seconds | Something is listening there but not replying - is it really a PhishNet API? |
 | … answered with HTTP …, not like a PhishNet API | The address points at a different web server. |
 | Only regular web pages … can be checked | You opened it on a browser page, a local file, or an extension page. |
+| PhishNet API requires an API key / rejected the API key | Paste the key from `phishnet serve` (or `~/.phishnet/api-key` on the server) into Settings → **API key**. If the server's key was replaced, paste the new one. |
+| Too many scan requests … | The server's rate limit (60 scans per minute per client by default). Wait the number of seconds shown; the server's admin can change it with `--rate-limit`. |
 
-**Settings → Test connection** is the quickest way to check the address.
+**Settings → Test connection** is the quickest way to check the address and the key.
 
 ## Files
 

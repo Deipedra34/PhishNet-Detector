@@ -82,6 +82,24 @@ build. It doesn't proxy the API, so use `phishnet serve` to try the real thing.
 The [Docker image](../README.md#docker) builds the dashboard in its own stage and
 ships it, so `docker run -p 8080:8080 <image> serve` serves the dashboard too.
 
+## The API key
+
+`phishnet serve` 2.9.0 and newer require an API key on every request except
+`GET /api/health`. On its first load the dashboard shows an **Enter your API key**
+screen: paste the key that `phishnet serve` printed when it first started (it's also
+in `~/.phishnet/api-key` on the server). The dashboard checks it with
+`GET /api/auth/check` and only saves it, in this browser's local storage, if the
+server accepts it. After that every request carries it in the `X-API-Key` header.
+
+- **Forget API key**, in the page footer, removes it from this browser.
+- If the server's key is replaced (`phishnet serve --regenerate-key`), the next
+  rejected request brings the key screen back.
+- Against a server started with `--no-auth`, or one older than 2.9.0, the dashboard
+  never asks.
+
+The key screen appears in development mode too: the Vite dev server forwards the
+header to the API.
+
 ## Choosing the API address
 
 By default every request goes to the origin the dashboard was loaded from. To use a
@@ -106,7 +124,10 @@ npm run test:watch     # re-runs on every change
 ```
 
 The tests cover the API client (`src/api/client.test.js`: URL building, request
-shapes, error handling) and the scan result card (`src/components/ScanResultCard.test.jsx`:
+shapes, error handling, the API key header and its storage, 401 and 429 handling),
+the key screen (`src/components/AuthGate.test.jsx`: when it appears, wrong and right
+keys, a key that stops working), the footer settings (`src/components/ApiSettings.test.jsx`),
+and the scan result card (`src/components/ScanResultCard.test.jsx`:
 risk level colors and labels, signals, domain age, feed matches, ML confidence, email
 details). The backend endpoints are tested by the Maven build (`DashboardApiTest`).
 
@@ -122,7 +143,7 @@ dashboard/
     ├── index.css            shared dark theme (colors from assets/banner.svg)
     ├── format.js            date, number, and duration formatting
     ├── api/client.js        fetch-based API client
-    ├── components/          Layout, ScanResultCard, RiskBadge, Pagination, ApiSettings
+    ├── components/          Layout, AuthGate and ApiKeySetup (API key screen), ScanResultCard, RiskBadge, Pagination, ApiSettings
     ├── pages/               ScanPage, HistoryPage, StatsPage, FeedsPage, NotFoundPage
     └── test/setup.js        Vitest setup
 ```
