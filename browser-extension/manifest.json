@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "PhishNet Detector",
-  "version": "2.4.0",
+  "version": "2.9.0",
   "description": "Checks the page you're on with your own PhishNet Detector API (phishnet serve) and shows its phishing risk score.",
   "homepage_url": "https://github.com/Deipedra34/PhishNet-Detector",
   "icons": {
