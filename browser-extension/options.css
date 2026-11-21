@@ -24,6 +24,33 @@ input {
   padding: 8px 10px;
 }
 
+.second-label {
+  margin-top: 18px;
+}
+
+.key-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.key-row input {
+  flex: 1;
+}
+
+.show-key {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: normal;
+  margin: 0;
+  white-space: nowrap;
+}
+
+.show-key input {
+  width: auto;
+}
+
 .help {
   font-size: 13px;
   margin: 8px 0 14px;

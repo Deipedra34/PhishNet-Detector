@@ -24,6 +24,18 @@
         with <code>-p 8080:8080</code>. For another port or machine, enter e.g.
         <code>http://localhost:9090</code> or <code>http://192.168.1.20:8080</code>.
       </p>
+      <label for="api-key" class="second-label">API key</label>
+      <div class="key-row">
+        <input id="api-key" name="api-key" type="password" spellcheck="false" autocomplete="off"
+               placeholder="paste the key printed by phishnet serve" aria-describedby="api-key-help">
+        <label class="show-key"><input id="show-key" type="checkbox"> Show</label>
+      </div>
+      <p id="api-key-help" class="muted help">
+        Since version 2.9.0, <code>phishnet serve</code> requires an API key. It prints the key when it first
+        starts and stores it in <code>~/.phishnet/api-key</code> on the server; a new one can be made with
+        <code>phishnet serve --regenerate-key</code>. Leave this empty for a server started with
+        <code>--no-auth</code>. The key is kept in this browser's extension storage.
+      </p>
       <div class="buttons">
         <button type="submit" class="primary">Save</button>
         <button type="button" id="test">Test connection</button>

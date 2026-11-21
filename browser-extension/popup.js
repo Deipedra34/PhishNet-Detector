@@ -1,7 +1,7 @@
 // Toolbar popup: scans the active tab's URL once, when the popup is opened.
 // Nothing runs in the background and no page is scanned unless you click the icon.
 
-import { ApiError, ext, getApiBaseUrl, isScannablePageUrl, scanUrl } from "./lib/api.js";
+import { ApiError, ext, getApiBaseUrl, getApiKey, isScannablePageUrl, scanUrl } from "./lib/api.js";
 
 /** How many signals to list before collapsing the rest into "+N more". */
 const MAX_SIGNALS = 5;
@@ -28,6 +28,9 @@ function showError(error) {
       + "A server on another machine needs PhishNet 2.4.0 or newer.",
     timeout: "Something is listening at that address but didn't reply. Check that it's a PhishNet API, "
       + "or try again.",
+    auth: "Open Settings and paste the API key that \"phishnet serve\" printed when it first started "
+      + "(it's stored in ~/.phishnet/api-key on the server).",
+    rate: "The server limits how many scans can be made per minute. Wait a moment, then try again.",
   };
   const hint = (isApiError && hints[error.kind]) || "";
   $("error-hint").textContent = hint;
@@ -80,10 +83,10 @@ function showResult(result) {
   show("result");
 }
 
-async function runScan(apiBaseUrl, pageUrl) {
+async function runScan(apiBaseUrl, apiKey, pageUrl) {
   show("loading");
   try {
-    showResult(await scanUrl(apiBaseUrl, pageUrl));
+    showResult(await scanUrl(apiBaseUrl, pageUrl, apiKey));
   } catch (error) {
     showError(error);
   }
@@ -98,6 +101,7 @@ async function main() {
 
   show("loading");
   const apiBaseUrl = await getApiBaseUrl();
+  const apiKey = await getApiKey();
   $("api-url").textContent = apiBaseUrl;
 
   // activeTab: clicking the toolbar icon grants access to this one tab's URL.
@@ -114,8 +118,8 @@ async function main() {
     return;
   }
 
-  $("retry").addEventListener("click", () => runScan(apiBaseUrl, pageUrl));
-  await runScan(apiBaseUrl, pageUrl);
+  $("retry").addEventListener("click", () => runScan(apiBaseUrl, apiKey, pageUrl));
+  await runScan(apiBaseUrl, apiKey, pageUrl);
 }
 
 main().catch(showError);
