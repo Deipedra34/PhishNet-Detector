@@ -1,6 +1,7 @@
 package com.phishnet.cli;
 
 import com.phishnet.analyzer.WhoisClient;
+import com.phishnet.api.ApiKeyStore;
 import com.phishnet.api.ApiServer;
 import com.phishnet.api.ScanService;
 import com.phishnet.feeds.ThreatFeedService;
@@ -14,10 +15,12 @@ import picocli.CommandLine.Option;
 import picocli.CommandLine.ParameterException;
 import picocli.CommandLine.Spec;
 
+import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.function.Function;
 
@@ -84,6 +87,11 @@ final class ServeCommand implements Callable<Integer> {
             description = "Serve the REST API only, without the web dashboard")
     private boolean noDashboard;
 
+    @Option(names = "--api-key-file", paramLabel = "<path>",
+            description = "Where the API key is kept (default: ~/.phishnet/api-key; created with a new random "
+                    + "key on first run). $" + ApiKeyStore.KEY_ENV + ", when set, is used instead.")
+    private String apiKeyFile;
+
     /** Environment variable naming the built dashboard directory (set in the Docker image). */
     static final String DASHBOARD_DIR_ENV = "PHISHNET_DASHBOARD_DIR";
 
@@ -91,6 +99,7 @@ final class ServeCommand implements Callable<Integer> {
     private final PrintStream err;
     private final WhoisClient whoisClient;
     private final Function<ThreatFeedSettings, ThreatFeedService> threatFeeds;
+    private final Map<String, String> environment;
 
     /**
      * @param threatFeeds builds the feed service behind {@code GET /api/feeds/status}
@@ -98,10 +107,17 @@ final class ServeCommand implements Callable<Integer> {
      */
     ServeCommand(PrintStream out, PrintStream err, WhoisClient whoisClient,
                  Function<ThreatFeedSettings, ThreatFeedService> threatFeeds) {
+        this(out, err, whoisClient, threatFeeds, System.getenv());
+    }
+
+    /** Same, with the environment ({@value ApiKeyStore#KEY_ENV}) swapped out for tests. */
+    ServeCommand(PrintStream out, PrintStream err, WhoisClient whoisClient,
+                 Function<ThreatFeedSettings, ThreatFeedService> threatFeeds, Map<String, String> environment) {
         this.out = out;
         this.err = err;
         this.whoisClient = whoisClient;
         this.threatFeeds = threatFeeds;
+        this.environment = environment;
     }
 
     @Override
@@ -135,6 +151,18 @@ final class ServeCommand implements Callable<Integer> {
             }
         }
 
+        // Loaded only now, after every option and the config have been checked, so a
+        // mistyped command line never creates a key file.
+        ApiKeyStore.LoadedKey apiKey;
+        try {
+            apiKey = ApiKeyStore.loadOrCreate(
+                    apiKeyFile != null ? Path.of(apiKeyFile) : ApiKeyStore.defaultPath(),
+                    environment.get(ApiKeyStore.KEY_ENV));
+        } catch (IOException | IllegalArgumentException e) {
+            err.println("Error: could not load the API key: " + e.getMessage());
+            return 1;
+        }
+
         // null = --no-whois / --no-history-db, same convention as the CLI scan modes.
         // The database is only created on the first recorded scan.
         Path historyFile = databaseFile != null ? Path.of(databaseFile) : HistoryDatabase.defaultPath();
@@ -164,6 +192,7 @@ final class ServeCommand implements Callable<Integer> {
         if (history != null) {
             out.println("Recording scans to " + history.file());
         }
+        printApiKey(apiKey);
         if (dashboard != null) {
             out.println("Web dashboard: http://localhost:" + server.port() + "/ (from " + dashboard.toAbsolutePath()
                     + ")");
@@ -172,6 +201,23 @@ final class ServeCommand implements Callable<Integer> {
                     + "(build it with: cd dashboard && npm install && npm run build)");
         }
         return 0;
+    }
+
+    /** Shows a newly generated key once, in full; otherwise only says where the key comes from. */
+    private void printApiKey(ApiKeyStore.LoadedKey apiKey) {
+        switch (apiKey.source()) {
+            case CREATED -> {
+                out.println();
+                out.println("Generated a new API key and saved it to " + apiKey.file().toAbsolutePath() + ":");
+                out.println();
+                out.println("    " + apiKey.key());
+                out.println();
+                out.println("It is shown only this once; to see it again, read that file.");
+                out.println();
+            }
+            case FILE -> out.println("API key: from " + apiKey.file().toAbsolutePath());
+            case ENVIRONMENT -> out.println("API key: from $" + ApiKeyStore.KEY_ENV);
+        }
     }
 
     /**
