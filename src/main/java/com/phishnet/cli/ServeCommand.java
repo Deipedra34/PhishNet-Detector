@@ -48,7 +48,9 @@ import java.util.function.Function;
         footer = {
                 "  phishnet serve",
                 "  phishnet serve --port 9090 --no-whois",
-                "  phishnet serve --dashboard dashboard/dist"
+                "  phishnet serve --dashboard dashboard/dist",
+                "  phishnet serve --regenerate-key      (replace the API key)",
+                "  phishnet serve --no-auth             (local development only: no API key)"
         }
 )
 final class ServeCommand implements Callable<Integer> {
@@ -92,6 +94,16 @@ final class ServeCommand implements Callable<Integer> {
                     + "key on first run). $" + ApiKeyStore.KEY_ENV + ", when set, is used instead.")
     private String apiKeyFile;
 
+    @Option(names = "--regenerate-key",
+            description = "Replace the API key with a new random one before starting (printed once). "
+                    + "The old key stops working; give the new one to every client.")
+    private boolean regenerateKey;
+
+    @Option(names = "--no-auth",
+            description = "Don't require an API key: anyone who can reach this port can scan and read the scan "
+                    + "history. Meant for local development only.")
+    private boolean noAuth;
+
     /** Environment variable naming the built dashboard directory (set in the Docker image). */
     static final String DASHBOARD_DIR_ENV = "PHISHNET_DASHBOARD_DIR";
 
@@ -126,6 +138,16 @@ final class ServeCommand implements Callable<Integer> {
             throw new ParameterException(spec.commandLine(),
                     "Invalid value for option '--port': " + port + " is not a valid port (0-65535)");
         }
+        if (noAuth && regenerateKey) {
+            throw new ParameterException(spec.commandLine(),
+                    "--regenerate-key and --no-auth can't be combined: with --no-auth no key is used");
+        }
+        String envKey = environment.get(ApiKeyStore.KEY_ENV);
+        if (regenerateKey && envKey != null && !envKey.isBlank()) {
+            err.println("Error: --regenerate-key can't replace a key set through $" + ApiKeyStore.KEY_ENV
+                    + "; set that variable to a new value instead");
+            return 1;
+        }
 
         PhishNetConfig config;
         try {
@@ -152,15 +174,17 @@ final class ServeCommand implements Callable<Integer> {
         }
 
         // Loaded only now, after every option and the config have been checked, so a
-        // mistyped command line never creates a key file.
-        ApiKeyStore.LoadedKey apiKey;
-        try {
-            apiKey = ApiKeyStore.loadOrCreate(
-                    apiKeyFile != null ? Path.of(apiKeyFile) : ApiKeyStore.defaultPath(),
-                    environment.get(ApiKeyStore.KEY_ENV));
-        } catch (IOException | IllegalArgumentException e) {
-            err.println("Error: could not load the API key: " + e.getMessage());
-            return 1;
+        // mistyped command line never creates a key file. null = --no-auth.
+        ApiKeyStore.LoadedKey apiKey = null;
+        if (!noAuth) {
+            Path keyFile = apiKeyFile != null ? Path.of(apiKeyFile) : ApiKeyStore.defaultPath();
+            try {
+                apiKey = regenerateKey ? ApiKeyStore.regenerate(keyFile) : ApiKeyStore.loadOrCreate(keyFile, envKey);
+            } catch (IOException | IllegalArgumentException e) {
+                err.println("Error: could not " + (regenerateKey ? "replace" : "load") + " the API key: "
+                        + e.getMessage());
+                return 1;
+            }
         }
 
         // null = --no-whois / --no-history-db, same convention as the CLI scan modes.
@@ -174,7 +198,7 @@ final class ServeCommand implements Callable<Integer> {
                 .withHistory(historyReader)
                 .withFeeds(threatFeeds.apply(config.threatFeeds().withEnvironment(System.getenv())))
                 .withDashboard(dashboard)
-                .withApiKey(apiKey.key());
+                .withApiKey(apiKey == null ? null : apiKey.key());
         try {
             server.start(port);
         } catch (RuntimeException e) {
@@ -194,7 +218,7 @@ final class ServeCommand implements Callable<Integer> {
         if (history != null) {
             out.println("Recording scans to " + history.file());
         }
-        printApiKey(apiKey);
+        printApiKey(apiKey, server.port());
         if (dashboard != null) {
             out.println("Web dashboard: http://localhost:" + server.port() + "/ (from " + dashboard.toAbsolutePath()
                     + ")");
@@ -206,17 +230,25 @@ final class ServeCommand implements Callable<Integer> {
     }
 
     /** Shows a newly generated key once, in full; otherwise only says where the key comes from. */
-    private void printApiKey(ApiKeyStore.LoadedKey apiKey) {
+    private void printApiKey(ApiKeyStore.LoadedKey apiKey, int listeningPort) {
+        if (apiKey == null) {
+            err.println("Warning: API authentication is disabled (--no-auth): anyone who can reach port "
+                    + listeningPort + " can scan and read the scan history.");
+            return;
+        }
         switch (apiKey.source()) {
-            case CREATED -> {
+            case CREATED, REGENERATED -> {
                 out.println();
-                out.println("Generated a new API key and saved it to " + apiKey.file().toAbsolutePath() + ":");
+                out.println((apiKey.source() == ApiKeyStore.Source.REGENERATED
+                        ? "Replaced the API key with a new one" : "Generated a new API key")
+                        + " and saved it to " + apiKey.file().toAbsolutePath() + ":");
                 out.println();
                 out.println("    " + apiKey.key());
                 out.println();
                 out.println("Clients (the browser extension, the web dashboard, scripts) must send it in the "
                         + ApiServer.API_KEY_HEADER + " header.");
-                out.println("It is shown only this once; to see it again, read that file.");
+                out.println("It is shown only this once; to see it again, read that file. "
+                        + "To replace it: phishnet serve --regenerate-key");
                 out.println();
             }
             case FILE -> out.println("API key required (" + ApiServer.API_KEY_HEADER + " header): from "

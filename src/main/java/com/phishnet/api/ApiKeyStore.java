@@ -49,6 +49,8 @@ public final class ApiKeyStore {
         FILE,
         /** Just generated and saved, because there was no key file yet. */
         CREATED,
+        /** Just generated and saved over the previous key ({@code --regenerate-key}). */
+        REGENERATED,
         /** Taken from {@value #KEY_ENV}. */
         ENVIRONMENT
     }
@@ -98,11 +100,11 @@ public final class ApiKeyStore {
         }
     }
 
-    /** Replaces the key in {@code file} with a new one and returns it. */
-    public static String regenerate(Path file) throws IOException {
+    /** Replaces the key in {@code file} (or creates the file) with a new random key. */
+    public static LoadedKey regenerate(Path file) throws IOException {
         String key = generate();
         write(file, key);
-        return key;
+        return new LoadedKey(key, Source.REGENERATED, file);
     }
 
     /**
