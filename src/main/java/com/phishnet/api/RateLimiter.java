@@ -25,6 +25,7 @@ public final class RateLimiter {
     static final int MAX_TRACKED_CLIENTS = 10_000;
 
     private static final long NANOS_PER_MINUTE = 60_000_000_000L;
+    private static final long ROUNDING_TOLERANCE_NANOS = 1_000_000L;
 
     private final int requestsPerMinute;
     private final LongSupplier nanoTime;
@@ -83,7 +84,9 @@ public final class RateLimiter {
                 return Decision.ALLOWED;
             }
             double nanosUntilToken = (1 - tokens) * NANOS_PER_MINUTE / requestsPerMinute;
-            return new Decision(false, Math.max(1, (long) Math.ceil(nanosUntilToken / 1_000_000_000d)));
+            // Rounded up to whole seconds, less 1 ms so floating-point drift can't turn an exact 10 s into 11.
+            long seconds = (long) Math.ceil((nanosUntilToken - ROUNDING_TOLERANCE_NANOS) / 1_000_000_000d);
+            return new Decision(false, Math.max(1, seconds));
         }
 
         synchronized boolean isFull(long now) {
