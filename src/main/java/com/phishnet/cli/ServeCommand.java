@@ -117,6 +117,8 @@ final class ServeCommand implements Callable<Integer> {
     private final WhoisClient whoisClient;
     private final Function<ThreatFeedSettings, ThreatFeedService> threatFeeds;
     private final Map<String, String> environment;
+    /** The running server once {@link #call()} has started it, so tests can stop it. */
+    private ApiServer startedServer;
 
     /**
      * @param threatFeeds builds the feed service behind {@code GET /api/feeds/status}
@@ -216,6 +218,7 @@ final class ServeCommand implements Callable<Integer> {
             return 1;
         }
         Runtime.getRuntime().addShutdownHook(new Thread(server::stop, "phishnet-api-shutdown"));
+        startedServer = server;
 
         out.println("PhishNet API listening on http://localhost:" + server.port() + " (Ctrl+C to stop)");
         out.println("  GET  /api/health");
@@ -241,6 +244,11 @@ final class ServeCommand implements Callable<Integer> {
                     + "(build it with: cd dashboard && npm install && npm run build)");
         }
         return 0;
+    }
+
+    /** The server {@link #call()} started, or {@code null} if it didn't start one (for tests). */
+    ApiServer startedServer() {
+        return startedServer;
     }
 
     /** --rate-limit if given, else the config's api.rateLimitPerMinute. */
