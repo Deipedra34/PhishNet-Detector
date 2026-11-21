@@ -389,14 +389,27 @@ public final class ApiServer {
                 && (ctx.path().equals("/api/scan/url") || ctx.path().equals("/api/scan/email"));
     }
 
+    /**
+     * Refuses a scan request over the client's limit with 429, a {@code Retry-After} header
+     * (whole seconds until the next request is allowed), and a JSON error saying so.
+     */
     private void enforceRateLimit(Context ctx) {
         if (rateLimiter == null || !isRateLimited(ctx)) {
             return;
         }
-        if (!rateLimiter.tryAcquire(ctx.ip()).allowed()) {
+        RateLimiter.Decision decision = rateLimiter.tryAcquire(ctx.ip());
+        if (!decision.allowed()) {
+            long seconds = decision.retryAfterSeconds();
+            // Headers set before throwing are kept on the error response.
+            ctx.header("Retry-After", Long.toString(seconds));
             throw new HttpResponseException(HttpStatus.TOO_MANY_REQUESTS.getCode(),
-                    HttpStatus.TOO_MANY_REQUESTS.getMessage());
+                    rateLimitMessage(rateLimiter.requestsPerMinute(), seconds));
         }
+    }
+
+    static String rateLimitMessage(int requestsPerMinute, long retryAfterSeconds) {
+        return "Too many scan requests: the limit is " + requestsPerMinute + " per minute per client. Try again in "
+                + retryAfterSeconds + (retryAfterSeconds == 1 ? " second." : " seconds.");
     }
 
     // --- CORS (browser extensions only) -------------------------------------------
@@ -410,6 +423,8 @@ public final class ApiServer {
         if (isExtensionOrigin(origin)) {
             ctx.header("Access-Control-Allow-Origin", origin);
             ctx.header("Vary", "Origin");
+            // Otherwise the browser hides Retry-After (on a 429) from the extension.
+            ctx.header("Access-Control-Expose-Headers", "Retry-After");
         }
     }
 
