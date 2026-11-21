@@ -467,7 +467,7 @@ class ApiServerTest {
             assertEquals(204, response.statusCode(), path);
             assertEquals(CHROME_EXTENSION, header(response, "Access-Control-Allow-Origin"));
             assertTrue(header(response, "Access-Control-Allow-Methods").contains("POST"));
-            assertEquals("Content-Type", header(response, "Access-Control-Allow-Headers"));
+            assertEquals("Content-Type, X-API-Key", header(response, "Access-Control-Allow-Headers"));
             assertEquals(ApiServer.CORS_MAX_AGE_SECONDS, header(response, "Access-Control-Max-Age"));
         }
     }

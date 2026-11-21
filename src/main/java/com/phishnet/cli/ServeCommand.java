@@ -173,7 +173,8 @@ final class ServeCommand implements Callable<Integer> {
         ApiServer server = new ApiServer(new ScanService(config, noWhois ? null : whoisClient, history), err)
                 .withHistory(historyReader)
                 .withFeeds(threatFeeds.apply(config.threatFeeds().withEnvironment(System.getenv())))
-                .withDashboard(dashboard);
+                .withDashboard(dashboard)
+                .withApiKey(apiKey.key());
         try {
             server.start(port);
         } catch (RuntimeException e) {
@@ -189,6 +190,7 @@ final class ServeCommand implements Callable<Integer> {
         out.println("  GET  /api/history");
         out.println("  GET  /api/history/stats");
         out.println("  GET  /api/feeds/status");
+        out.println("  GET  /api/auth/check");
         if (history != null) {
             out.println("Recording scans to " + history.file());
         }
@@ -212,11 +214,15 @@ final class ServeCommand implements Callable<Integer> {
                 out.println();
                 out.println("    " + apiKey.key());
                 out.println();
+                out.println("Clients (the browser extension, the web dashboard, scripts) must send it in the "
+                        + ApiServer.API_KEY_HEADER + " header.");
                 out.println("It is shown only this once; to see it again, read that file.");
                 out.println();
             }
-            case FILE -> out.println("API key: from " + apiKey.file().toAbsolutePath());
-            case ENVIRONMENT -> out.println("API key: from $" + ApiKeyStore.KEY_ENV);
+            case FILE -> out.println("API key required (" + ApiServer.API_KEY_HEADER + " header): from "
+                    + apiKey.file().toAbsolutePath());
+            case ENVIRONMENT -> out.println("API key required (" + ApiServer.API_KEY_HEADER + " header): from $"
+                    + ApiKeyStore.KEY_ENV);
         }
     }
 

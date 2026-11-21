@@ -23,6 +23,8 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.sql.SQLException;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -41,7 +43,12 @@ import java.util.regex.Pattern;
  *   <li>{@code GET  /api/history}    - one page of scans from the SQLite scan history, filterable (read-only)</li>
  *   <li>{@code GET  /api/history/stats} - the aggregate figures of {@code phishnet history stats}</li>
  *   <li>{@code GET  /api/feeds/status} - threat feed cache state, as {@code phishnet feeds status}</li>
+ *   <li>{@code GET  /api/auth/check} - {@code {"status":"ok"}} when the request's API key is accepted</li>
  * </ul>
+ *
+ * <p>With an API key set ({@link #withApiKey}), every endpoint except {@code GET /api/health}
+ * requires it in the {@value #API_KEY_HEADER} header and answers 401 without it. A missing
+ * key and a wrong one get the same answer, and keys are compared in constant time.
  *
  * Every error - bad input, unknown route, oversized body, or an unexpected
  * failure - is answered with a JSON {@code {"error":"..."}} body; stack traces
@@ -73,7 +80,17 @@ public final class ApiServer {
 
     /** Every endpoint path, for CORS preflights and the dashboard's 404/405 fallback. */
     static final List<String> API_PATHS = List.of("/api/health", "/api/scan/url", "/api/scan/email",
-            "/api/history", "/api/history/stats", "/api/feeds/status");
+            "/api/history", "/api/history/stats", "/api/feeds/status", "/api/auth/check");
+
+    /** Request header carrying the API key. */
+    public static final String API_KEY_HEADER = "X-API-Key";
+
+    /** The only endpoint open without an API key, for uptime checks. */
+    static final String HEALTH_PATH = "/api/health";
+
+    /** The 401 message - identical for a missing and a wrong key. */
+    static final String UNAUTHORIZED_MESSAGE = "Missing or invalid API key. Send the key that 'phishnet serve' "
+            + "printed in the " + API_KEY_HEADER + " header (by default it is stored in ~/.phishnet/api-key).";
 
     /** The dashboard's entry page, served for every client-side route. */
     static final String DASHBOARD_INDEX = "index.html";
@@ -94,6 +111,8 @@ public final class ApiServer {
     private FeedsApi feedsApi;
     /** Built web dashboard to serve at "/", or {@code null} to serve the API only. */
     private Path dashboardDirectory;
+    /** SHA-256 of the required API key, or {@code null} when no key is required. */
+    private byte[] apiKeyDigest;
 
     /**
      * @param log where unexpected (500) errors are reported, with their stack trace
@@ -150,6 +169,16 @@ public final class ApiServer {
         return this;
     }
 
+    /**
+     * Requires {@code apiKey} in the {@value #API_KEY_HEADER} header on every endpoint except
+     * {@code GET /api/health}; {@code null} requires none. Must be called before {@link #start}.
+     */
+    public ApiServer withApiKey(String apiKey) {
+        requireNotStarted();
+        this.apiKeyDigest = apiKey == null ? null : sha256(apiKey);
+        return this;
+    }
+
     /** Whether {@code directory} looks like a built dashboard (it has an index.html). */
     public static boolean isDashboardDirectory(Path directory) {
         return directory != null && Files.isRegularFile(directory.resolve(DASHBOARD_INDEX));
@@ -202,6 +231,7 @@ public final class ApiServer {
             if (ctx.req().getContentLengthLong() > maxRequestBytes) {
                 throw tooLarge();
             }
+            requireApiKey(ctx);
         });
         config.routes.get("/api/health", ctx -> respond(ctx, HttpStatus.OK, Map.of("status", "ok")));
         config.routes.post("/api/scan/url", this::scanUrl);
@@ -209,6 +239,8 @@ public final class ApiServer {
         config.routes.get("/api/history", ctx -> respond(ctx, HttpStatus.OK, history().list(ctx)));
         config.routes.get("/api/history/stats", ctx -> respond(ctx, HttpStatus.OK, history().stats(ctx)));
         config.routes.get("/api/feeds/status", ctx -> respond(ctx, HttpStatus.OK, feeds().status()));
+        // Reaching this handler means the key (if one is required) was accepted.
+        config.routes.get("/api/auth/check", ctx -> respond(ctx, HttpStatus.OK, Map.of("status", "ok")));
         // Per endpoint rather than "/api/*", so an unknown path still answers 404, not 405.
         for (String path : API_PATHS) {
             config.routes.options(path, this::preflight);
@@ -306,6 +338,29 @@ public final class ApiServer {
         return feedsApi;
     }
 
+    // --- API key ----------------------------------------------------------------------
+
+    private void requireApiKey(Context ctx) {
+        if (apiKeyDigest == null || ctx.path().equals(HEALTH_PATH) || ctx.method().name().equals("OPTIONS")) {
+            // Browsers send CORS preflights without custom headers, so they can't carry the key.
+            return;
+        }
+        String provided = ctx.header(API_KEY_HEADER);
+        // Digests are compared rather than the keys, so the comparison takes the same time
+        // whatever the provided key's length or how much of it matches.
+        if (provided == null || !MessageDigest.isEqual(sha256(provided), apiKeyDigest)) {
+            throw new HttpResponseException(HttpStatus.UNAUTHORIZED.getCode(), UNAUTHORIZED_MESSAGE);
+        }
+    }
+
+    private static byte[] sha256(String value) {
+        try {
+            return MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is missing from this Java runtime", e);
+        }
+    }
+
     // --- CORS (browser extensions only) -------------------------------------------
 
     static boolean isExtensionOrigin(String origin) {
@@ -330,7 +385,7 @@ public final class ApiServer {
                     HttpStatus.METHOD_NOT_ALLOWED.getMessage());
         }
         ctx.header("Access-Control-Allow-Methods", "GET, POST");
-        ctx.header("Access-Control-Allow-Headers", "Content-Type");
+        ctx.header("Access-Control-Allow-Headers", "Content-Type, " + API_KEY_HEADER);
         ctx.header("Access-Control-Max-Age", CORS_MAX_AGE_SECONDS);
         ctx.status(HttpStatus.NO_CONTENT);
     }
