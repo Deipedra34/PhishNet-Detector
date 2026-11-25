@@ -1,6 +1,7 @@
 package com.phishnet.cli;
 
 import com.phishnet.feeds.FeedStatus;
+import com.phishnet.i18n.Messages;
 import com.phishnet.ml.MlPrediction;
 import com.phishnet.model.DomainAgeResult;
 import com.phishnet.model.EmailAnalysisResult;
@@ -34,6 +35,7 @@ public final class Reporter {
     private final OutputLevel level;
     private final boolean colorEnabled;
     private final List<FeedStatus> feedStatuses;
+    private final Messages msg = Messages.current();
 
     public Reporter(PrintStream out, OutputLevel level, boolean colorEnabled) {
         this(out, level, colorEnabled, List.of());
@@ -103,7 +105,7 @@ public final class Reporter {
         if (level == OutputLevel.QUIET) {
             return;
         }
-        out.println("Summary: " + total + " URL(s) analyzed - " + high + " high risk, " + medium + " medium risk");
+        out.println(msg.get("report.batchSummary", total, high, medium));
         if (level == OutputLevel.VERBOSE) {
             printThreatFeeds();
         }
@@ -117,7 +119,7 @@ public final class Reporter {
         if (feedStatuses.stream().allMatch(status -> status.state() == FeedStatus.State.OFF)) {
             return;
         }
-        out.println("Threat Feeds:");
+        out.println(msg.get("report.threatFeeds"));
         for (FeedStatus status : feedStatuses) {
             out.println("  " + status.source().displayName() + ": " + status.describe());
         }
@@ -126,15 +128,15 @@ public final class Reporter {
     // --- summary block, shared by NORMAL and VERBOSE ------------------------
 
     private void printSummary(String target, RiskScore score, DomainAgeResult domainAge, MlPrediction ml) {
-        out.println("Target: " + target);
-        out.println("Risk Score: " + score.score() + "/100 (" + coloredLevel(score.level()) + ")");
+        out.println(msg.get("report.target", target));
+        out.println(msg.get("report.riskScore", score.score(), coloredLevel(score.level())));
         printDomainAge(domainAge);
         printMlConfidence(ml);
 
         if (score.signals().isEmpty()) {
-            out.println(AnsiColor.apply("✓", colorEnabled, AnsiColor.GREEN) + " No phishing indicators detected");
+            out.println(AnsiColor.apply("✓", colorEnabled, AnsiColor.GREEN) + " " + msg.get("report.noIndicators"));
         } else {
-            out.println("Signals:");
+            out.println(msg.get("report.signals"));
             String symbol = symbolFor(score.level());
             AnsiColor color = colorFor(score.level());
             for (Signal signal : score.signals()) {
@@ -147,7 +149,7 @@ public final class Reporter {
                 out.println(line);
             }
         }
-        out.println("Recommendation: " + score.recommendation());
+        out.println(msg.get("report.recommendation", score.recommendation()));
     }
 
     /**
@@ -159,11 +161,11 @@ public final class Reporter {
         if (domainAge == null || domainAge.isSkipped()) {
             return;
         }
-        StringBuilder line = new StringBuilder("Domain Age: ").append(domainAge.formatAge());
+        StringBuilder line = new StringBuilder(msg.get("report.domainAge", domainAge.formatAge()));
         if (level == OutputLevel.VERBOSE) {
             if (domainAge.isKnown()) {
-                line.append(" (").append(domainAge.ageDays()).append(" days, created ")
-                        .append(domainAge.creationDate()).append(", via ").append(domainAge.whoisServer()).append(")");
+                line.append(" (").append(msg.get("report.domainAge.known", domainAge.ageDays(),
+                        domainAge.creationDate(), domainAge.whoisServer())).append(")");
             } else if (!domainAge.reason().isEmpty()) {
                 line.append(" (").append(domainAge.reason()).append(")");
             }
@@ -179,11 +181,11 @@ public final class Reporter {
         if (ml == null) {
             return;
         }
-        out.println("ML Confidence: " + ml.displayPercent() + " phishing-like (experimental)");
+        out.println(msg.get("report.mlConfidence", ml.displayPercent()));
     }
 
     private void printUrlDetails(UrlComponents c, MlPrediction ml) {
-        out.println("Details:");
+        out.println(msg.get("report.details"));
         out.println("  scheme=" + c.scheme() + ", host=" + c.host() + ", subdomain=" + c.subdomain()
                 + ", domain=" + c.domain() + ", tld=" + c.tld() + ", ip=" + c.isIpHost());
         out.println("  path=" + c.path() + ", query params=" + c.queryParams().size());
@@ -193,11 +195,12 @@ public final class Reporter {
     }
 
     private void printEmailDetails(EmailAnalysisResult result) {
-        out.println("Details:");
-        out.println("  From: " + result.displayName() + " <" + result.senderAddress() + ">");
-        out.println("  Reply-To: " + (result.replyToAddress().isEmpty() ? "(none)" : result.replyToAddress()));
-        out.println("  Subject: " + result.subject());
-        out.println("  Links inspected (" + result.linkResults().size() + "):");
+        out.println(msg.get("report.details"));
+        out.println("  " + msg.get("report.email.from", result.displayName(), result.senderAddress()));
+        out.println("  " + msg.get("report.email.replyTo",
+                result.replyToAddress().isEmpty() ? msg.get("common.none") : result.replyToAddress()));
+        out.println("  " + msg.get("report.email.subject", result.subject()));
+        out.println("  " + msg.get("report.email.links", result.linkResults().size()));
         for (UrlAnalysisResult link : result.linkResults()) {
             out.println("    - " + link.components().rawUrl());
         }
@@ -208,7 +211,7 @@ public final class Reporter {
     }
 
     private String coloredLevel(RiskLevel level) {
-        return AnsiColor.apply(level.name(), colorEnabled, AnsiColor.BOLD, colorFor(level));
+        return AnsiColor.apply(msg.get("risk." + level.name()), colorEnabled, AnsiColor.BOLD, colorFor(level));
     }
 
     private static AnsiColor colorFor(RiskLevel level) {

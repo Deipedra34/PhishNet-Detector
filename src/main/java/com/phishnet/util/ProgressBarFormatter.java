@@ -1,5 +1,7 @@
 package com.phishnet.util;
 
+import com.phishnet.i18n.Messages;
+
 /**
  * Pure string formatting for a batch-mode progress line, e.g.
  * {@code [########------------] 40% (12/30) ETA 0:18}. Kept free of any
@@ -46,7 +48,7 @@ public final class ProgressBarFormatter {
             return null;
         }
         long remainingMillis = elapsedMillis * (total - completed) / completed;
-        return "ETA " + formatDuration(remainingMillis);
+        return Messages.text("progress.eta", formatDuration(remainingMillis));
     }
 
     private static String formatDuration(long millis) {

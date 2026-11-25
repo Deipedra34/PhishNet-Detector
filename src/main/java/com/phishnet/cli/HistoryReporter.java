@@ -2,6 +2,7 @@ package com.phishnet.cli;
 
 import com.phishnet.history.HistoryEntry;
 import com.phishnet.history.HistoryStats;
+import com.phishnet.i18n.Messages;
 import com.phishnet.model.RiskLevel;
 import com.phishnet.util.AnsiColor;
 
@@ -30,6 +31,7 @@ final class HistoryReporter {
     private final OutputLevel level;
     private final boolean colorEnabled;
     private final ZoneId zone;
+    private final Messages msg = Messages.current();
 
     HistoryReporter(PrintStream out, OutputLevel level, boolean colorEnabled, ZoneId zone) {
         this.out = out;
@@ -50,27 +52,37 @@ final class HistoryReporter {
             return;
         }
         if (entries.isEmpty()) {
-            out.println(emptyMessage + " (database: " + database + ")");
+            out.println(msg.get("history.withDatabase", emptyMessage, database));
             return;
         }
 
         DateTimeFormatter timeFormat = level == OutputLevel.VERBOSE ? SECONDS : MINUTES;
-        int idWidth = "ID".length();
-        int timeWidth = "TIME".length();
+        String idHeader = msg.get("history.column.id");
+        String timeHeader = msg.get("history.column.time");
+        String typeHeader = msg.get("history.column.type");
+        String scoreHeader = msg.get("history.column.score");
+        String riskHeader = msg.get("history.column.risk");
+        int idWidth = idHeader.length();
+        int timeWidth = timeHeader.length();
+        // Never narrower than the English columns, so the English table keeps its layout.
+        int typeWidth = Math.max(5, Math.max(typeHeader.length(), typeLabelWidth()));
+        int scoreWidth = Math.max(5, scoreHeader.length());
+        int riskWidth = Math.max(6, Math.max(riskHeader.length(), riskLabelWidth()));
         for (HistoryEntry entry : entries) {
             idWidth = Math.max(idWidth, Long.toString(entry.id()).length());
             timeWidth = Math.max(timeWidth, formatTime(entry.timestamp(), timeFormat).length());
         }
 
-        out.println(padLeft("ID", idWidth) + "  " + padRight("TIME", timeWidth) + "  "
-                + padRight("TYPE", 5) + "  " + padLeft("SCORE", 5) + "  " + padRight("RISK", 6) + "  TARGET");
+        out.println(padLeft(idHeader, idWidth) + "  " + padRight(timeHeader, timeWidth) + "  "
+                + padRight(typeHeader, typeWidth) + "  " + padLeft(scoreHeader, scoreWidth) + "  "
+                + padRight(riskHeader, riskWidth) + "  " + msg.get("history.column.target"));
         for (HistoryEntry entry : entries) {
             // Pad before coloring so the escape codes don't throw the column widths off.
-            String risk = padRight(entry.riskLevel().name(), 6);
+            String risk = padRight(riskLabel(entry.riskLevel()), riskWidth);
             out.println(padLeft(Long.toString(entry.id()), idWidth) + "  "
                     + padRight(formatTime(entry.timestamp(), timeFormat), timeWidth) + "  "
-                    + padRight(entry.type().name(), 5) + "  "
-                    + padLeft(Integer.toString(entry.riskScore()), 5) + "  "
+                    + padRight(typeLabel(entry.type()), typeWidth) + "  "
+                    + padLeft(Integer.toString(entry.riskScore()), scoreWidth) + "  "
                     + coloredLevel(entry.riskLevel(), risk) + "  "
                     + entry.target());
             if (level == OutputLevel.VERBOSE) {
@@ -78,7 +90,7 @@ final class HistoryReporter {
             }
         }
         out.println();
-        out.println(entries.size() + " scan(s) shown (database: " + database + ")");
+        out.println(msg.get("history.shown", entries.size(), database));
     }
 
     void printStats(HistoryStats stats, Path database) {
@@ -92,36 +104,38 @@ final class HistoryReporter {
             return;
         }
         if (stats.total() == 0) {
-            out.println("No scans recorded yet (database: " + database + ")");
+            out.println(msg.get("history.withDatabase", msg.get("history.noScans"), database));
             return;
         }
 
-        out.println("Total scans: " + stats.total() + " (" + formatTime(stats.firstScan(), MINUTES)
-                + " to " + formatTime(stats.lastScan(), MINUTES) + ")");
-        out.println("Database: " + database);
+        out.println(msg.get("history.stats.total", stats.total(), formatTime(stats.firstScan(), MINUTES),
+                formatTime(stats.lastScan(), MINUTES)));
+        out.println(msg.get("history.stats.database", database));
 
         out.println();
-        out.println("By risk level:");
+        out.println(msg.get("history.stats.byRisk"));
         int countWidth = Long.toString(stats.total()).length();
+        int labelWidth = Math.max(6, riskLabelWidth());
         for (RiskLevel riskLevel : new RiskLevel[] {RiskLevel.HIGH, RiskLevel.MEDIUM, RiskLevel.LOW}) {
             long count = stats.byRiskLevel().get(riskLevel);
             double percent = 100.0 * count / stats.total();
-            out.println("  " + coloredLevel(riskLevel, padRight(riskLevel.name(), 6)) + "  "
+            out.println("  " + coloredLevel(riskLevel, padRight(riskLabel(riskLevel), labelWidth)) + "  "
                     + padLeft(Long.toString(count), countWidth) + "  "
                     + padLeft(String.format(Locale.ROOT, "%.1f%%", percent), 6));
         }
 
         out.println();
-        out.println("By type:");
+        out.println(msg.get("history.stats.byType"));
+        int typeWidth = Math.max(6, typeLabelWidth());
         for (HistoryWriter.TargetType type : HistoryWriter.TargetType.values()) {
-            out.println("  " + padRight(type.name(), 6) + "  "
+            out.println("  " + padRight(typeLabel(type), typeWidth) + "  "
                     + padLeft(Long.toString(stats.byType().get(type)), countWidth));
         }
 
         out.println();
-        out.println("Most frequently flagged domains (MEDIUM/HIGH risk):");
+        out.println(msg.get("history.stats.topDomains"));
         if (stats.topFlaggedDomains().isEmpty()) {
-            out.println("  (none)");
+            out.println("  " + msg.get("common.none"));
             return;
         }
         int domainWidth = 0;
@@ -139,17 +153,18 @@ final class HistoryReporter {
     private void printDetails(HistoryEntry entry, int indent) {
         String pad = " ".repeat(indent);
         if (entry.domain() != null) {
-            String age = entry.domainAgeDays() == null ? "" : ", domain age " + entry.domainAgeDays() + " days";
-            out.println(pad + "Domain: " + entry.domain() + age);
+            out.println(pad + (entry.domainAgeDays() == null
+                    ? msg.get("history.detail.domain", entry.domain())
+                    : msg.get("history.detail.domainWithAge", entry.domain(), entry.domainAgeDays())));
         }
         if (entry.subject() != null) {
-            out.println(pad + "Subject: " + entry.subject());
+            out.println(pad + msg.get("report.email.subject", entry.subject()));
         }
         if (entry.reasons().isEmpty()) {
-            out.println(pad + "Signals: none");
+            out.println(pad + msg.get("report.signals.none"));
             return;
         }
-        out.println(pad + "Signals:");
+        out.println(pad + msg.get("report.signals"));
         for (HistoryEntry.Reason reason : entry.reasons()) {
             out.println(pad + "  - [" + reason.id() + "] " + reason.description());
         }
@@ -161,9 +176,33 @@ final class HistoryReporter {
 
     private String coloredLevel(RiskLevel riskLevel, String text) {
         // Color only the level name, not the padding after it.
-        String name = riskLevel.name();
+        String name = riskLabel(riskLevel);
         return AnsiColor.apply(name, colorEnabled, AnsiColor.BOLD, colorFor(riskLevel))
                 + text.substring(name.length());
+    }
+
+    private String riskLabel(RiskLevel riskLevel) {
+        return msg.get("risk." + riskLevel.name());
+    }
+
+    private int riskLabelWidth() {
+        int width = 0;
+        for (RiskLevel riskLevel : RiskLevel.values()) {
+            width = Math.max(width, riskLabel(riskLevel).length());
+        }
+        return width;
+    }
+
+    private String typeLabel(HistoryWriter.TargetType type) {
+        return msg.get("type." + type.name());
+    }
+
+    private int typeLabelWidth() {
+        int width = 0;
+        for (HistoryWriter.TargetType type : HistoryWriter.TargetType.values()) {
+            width = Math.max(width, typeLabel(type).length());
+        }
+        return width;
     }
 
     private static AnsiColor colorFor(RiskLevel riskLevel) {

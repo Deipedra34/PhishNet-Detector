@@ -1,5 +1,6 @@
 package com.phishnet.cli;
 
+import com.phishnet.i18n.Messages;
 import com.phishnet.ml.FeatureVector;
 import com.phishnet.ml.MlModel;
 import com.phishnet.ml.MlScorer;
@@ -38,7 +39,7 @@ final class ModelCommand implements Callable<Integer> {
 
     @Override
     public Integer call() {
-        throw new ParameterException(spec.commandLine(), "Missing required command: train or info");
+        throw new ParameterException(spec.commandLine(), Messages.text("cli.missingCommand.two", "train", "info"));
     }
 
     /** The {@code model} command with its subcommands wired to the given streams. */
@@ -69,10 +70,10 @@ final class ModelCommand implements Callable<Integer> {
 
         /** Dataset, size, class balance, and training accuracy lines shared by train and info. */
         void printTrainingSummary(MlModel model) {
-            out.println("Training data:     " + model.dataset());
-            out.println("Dataset size:      " + model.datasetSize() + " examples ("
-                    + model.phishingExamples() + " phishing, " + model.legitimateExamples() + " legitimate)");
-            out.println("Training accuracy: " + percent(model.trainingAccuracy()));
+            out.println(Messages.text("model.trainingData", model.dataset()));
+            out.println(Messages.text("model.datasetSize", model.datasetSize(), model.phishingExamples(),
+                    model.legitimateExamples()));
+            out.println(Messages.text("model.trainingAccuracy", percent(model.trainingAccuracy())));
         }
     }
 
@@ -98,7 +99,7 @@ final class ModelCommand implements Callable<Integer> {
                 data = dataPath != null ? TrainingData.load(Path.of(dataPath)) : TrainingData.bundled();
             } catch (IOException | RuntimeException e) {
                 String source = dataPath != null ? dataPath : TrainingData.BUNDLED_SOURCE;
-                err.println("Error: could not load training data " + source + ": " + describe(e));
+                err.println(Messages.text("model.error.loadData", source, describe(e)));
                 return 1;
             }
 
@@ -107,13 +108,13 @@ final class ModelCommand implements Callable<Integer> {
             try {
                 model.save(file);
             } catch (IOException | RuntimeException e) {
-                err.println("Error: could not save the model to " + file + ": " + describe(e));
+                err.println(Messages.text("model.error.save", file, describe(e)));
                 return 1;
             }
 
-            out.println("Trained a " + algorithmName(model) + " model on " + model.featureCount() + " features.");
+            out.println(Messages.text("model.trained", algorithmName(model), model.featureCount()));
             printTrainingSummary(model);
-            out.println("Model saved to:    " + file);
+            out.println(Messages.text("model.savedTo", file));
             return 0;
         }
     }
@@ -134,32 +135,30 @@ final class ModelCommand implements Callable<Integer> {
         public Integer call() {
             Path file = modelFile();
             if (!Files.exists(file)) {
-                out.println("No trained model at " + file + " yet.");
-                out.println("One is trained from the bundled dataset automatically on the first scan, "
-                        + "or run: phishnet model train");
+                out.println(Messages.text("model.none", file));
+                out.println(Messages.text("model.none.hint"));
                 return 0;
             }
             MlModel model;
             try {
                 model = MlModel.load(file);
             } catch (IOException | RuntimeException e) {
-                err.println("Error: could not read model file " + file + ": " + describe(e));
-                err.println("Retrain it with: phishnet model train");
+                err.println(Messages.text("model.error.read", file, describe(e)));
+                err.println(Messages.text("model.retrainHint"));
                 return 1;
             }
 
-            out.println("Model file:        " + file);
-            out.println("Algorithm:         " + algorithmName(model));
-            out.println("Trained:           " + model.trainedAt());
+            out.println(Messages.text("model.file", file));
+            out.println(Messages.text("model.algorithm", algorithmName(model)));
+            out.println(Messages.text("model.trainedAt", model.trainedAt()));
             printTrainingSummary(model);
-            out.println("Features (" + model.featureCount() + "):");
+            out.println(Messages.text("model.features", model.featureCount()));
             double[] weights = model.classifier().weights();
             for (int i = 0; i < weights.length; i++) {
                 out.println(String.format(Locale.ROOT, "  %-16s %+.3f", FeatureVector.NAMES.get(i), weights[i]));
             }
             out.println(String.format(Locale.ROOT, "  %-16s %+.3f", "(bias)", model.classifier().bias()));
-            out.println("Weights apply to standardized feature values: positive pushes toward phishing, "
-                    + "negative toward legitimate.");
+            out.println(Messages.text("model.weightsHint"));
             return 0;
         }
     }
@@ -175,7 +174,7 @@ final class ModelCommand implements Callable<Integer> {
     /** An exception's message, readable even for the ones whose message is just a path or missing. */
     private static String describe(Exception e) {
         if (e instanceof NoSuchFileException) {
-            return "file not found";
+            return Messages.text("cli.fileNotFound");
         }
         return e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
     }

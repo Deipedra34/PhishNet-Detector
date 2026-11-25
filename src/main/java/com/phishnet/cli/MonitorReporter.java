@@ -1,5 +1,6 @@
 package com.phishnet.cli;
 
+import com.phishnet.i18n.Messages;
 import com.phishnet.mail.MailMonitorService;
 import com.phishnet.mail.MailMonitorService.ScanResult;
 import com.phishnet.mail.MailSource.IncomingMail;
@@ -37,6 +38,7 @@ final class MonitorReporter implements MailMonitorService.Listener {
     private final boolean color;
     private final Clock clock;
     private final String waitDescription;
+    private final Messages msg = Messages.current();
 
     private int scanned;
     private int suspicious;
@@ -68,24 +70,24 @@ final class MonitorReporter implements MailMonitorService.Listener {
     @Override
     public void connecting(String mailbox, int attempt) {
         if (level == OutputLevel.VERBOSE) {
-            status("Connecting to " + mailbox + (attempt > 1 ? " (attempt " + attempt + ")" : "") + "...");
+            status(attempt > 1 ? msg.get("monitor.connecting.attempt", mailbox, attempt)
+                    : msg.get("monitor.connecting", mailbox));
         }
     }
 
     @Override
     public void connected(String mailbox, boolean idle) {
         if (level != OutputLevel.QUIET) {
-            status("Connected. Waiting for new mail ("
-                    + (idle ? "IMAP IDLE - near real time" : waitDescription) + ").");
+            status(msg.get("monitor.connected", idle ? msg.get("monitor.idle") : waitDescription));
         }
     }
 
     @Override
     public void notice(String message) {
         if (level == OutputLevel.QUIET) {
-            err.println("Note: " + message);
+            err.println(msg.get("monitor.note", message));
         } else {
-            status("Note: " + message);
+            status(msg.get("monitor.note", message));
         }
     }
 
@@ -102,7 +104,7 @@ final class MonitorReporter implements MailMonitorService.Listener {
             printResult(result);
         }
         for (String failure : result.actionFailures()) {
-            err.println("Warning: could not " + failure + " (" + result.mail().label() + ")");
+            err.println(msg.get("monitor.actionFailed", failure, result.mail().label()));
         }
     }
 
@@ -110,15 +112,15 @@ final class MonitorReporter implements MailMonitorService.Listener {
         EmailAnalysisResult analysis = result.analysis();
         RiskLevel risk = result.score().level();
         boolean flagged = result.plan().suspicious();
-        String verdict = (flagged ? symbolFor(risk) + " " : "") + risk.name() + " " + result.score().score() + "/100";
+        String verdict = (flagged ? symbolFor(risk) + " " : "") + msg.get("risk." + risk.name()) + " "
+                + result.score().score() + "/100";
         out.println("[" + now() + "] " + AnsiColor.apply(verdict, color, AnsiColor.BOLD, colorFor(risk))
-                + "  From: " + sender(analysis) + "  Subject: " + clean(analysis.subject(), "(no subject)"));
+                + "  " + msg.get("monitor.fromSubject", sender(analysis), clean(analysis.subject(), msg.get("monitor.noSubject"))));
 
         boolean details = flagged || level == OutputLevel.VERBOSE;
         if (level == OutputLevel.VERBOSE) {
-            out.println("  Message: " + result.mail().label()
-                    + ", links inspected: " + analysis.linkResults().size()
-                    + (result.truncated() ? ", analyzed the first 10 MB only" : ""));
+            out.println("  " + msg.get(result.truncated() ? "monitor.message.truncated" : "monitor.message",
+                    result.mail().label(), analysis.linkResults().size()));
         }
         if (details && !result.score().signals().isEmpty()) {
             for (Signal signal : result.score().signals()) {
@@ -135,37 +137,37 @@ final class MonitorReporter implements MailMonitorService.Listener {
             out.println("  " + result.score().recommendation());
         }
         if (!result.actionsTaken().isEmpty() && (flagged || level == OutputLevel.VERBOSE)) {
-            out.println("  Actions: " + String.join(", ", result.actionsTaken()));
+            out.println("  " + msg.get("monitor.actions", String.join(", ", result.actionsTaken())));
         }
     }
 
     @Override
     public void messageFailed(IncomingMail mail, Exception error, boolean skipped) {
-        err.println("Warning: could not scan " + mail.label() + ": " + describe(error)
-                + (skipped ? " - skipping it" : " - will try again"));
+        err.println(msg.get(skipped ? "monitor.scanFailed.skip" : "monitor.scanFailed.retry", mail.label(),
+                describe(error)));
     }
 
     @Override
     public void connectionLost(Exception error, Duration retryIn, int attempt) {
-        err.println("[" + now() + "] Connection problem: " + describe(error) + ". Reconnecting in "
-                + formatDuration(retryIn) + (attempt > 1 ? " (attempt " + attempt + ")" : "") + "...");
+        err.println("[" + now() + "] " + (attempt > 1
+                ? msg.get("monitor.connectionLost.attempt", describe(error), formatDuration(retryIn), attempt)
+                : msg.get("monitor.connectionLost", describe(error), formatDuration(retryIn))));
     }
 
     @Override
     public void fatal(Exception error) {
         if (error instanceof AuthenticationFailedException) {
-            err.println("Error: the mail server rejected the login: " + describe(error));
-            err.println("Check the username and password. Gmail, Outlook.com, iCloud, and Yahoo require an "
-                    + "app password (or --oauth2 with an access token), not your regular account password.");
+            err.println(msg.get("monitor.loginRejected", describe(error)));
+            err.println(msg.get("monitor.loginHint"));
         } else {
-            err.println("Error: " + describe(error));
+            err.println(msg.get("cli.error", describe(error)));
         }
     }
 
     @Override
     public void stopped() {
         if (level != OutputLevel.QUIET) {
-            status("Monitoring stopped. Scanned " + scanned + " message(s), " + suspicious + " suspicious.");
+            status(msg.get("monitor.stopped", scanned, suspicious));
         }
     }
 
@@ -191,7 +193,7 @@ final class MonitorReporter implements MailMonitorService.Listener {
         String address = clean(analysis.senderAddress(), "");
         String name = clean(analysis.displayName(), "");
         if (address.isEmpty()) {
-            return name.isEmpty() ? "(unknown sender)" : name;
+            return name.isEmpty() ? Messages.text("monitor.unknownSender") : name;
         }
         return name.isEmpty() ? "<" + address + ">" : name + " <" + address + ">";
     }
@@ -220,12 +222,14 @@ final class MonitorReporter implements MailMonitorService.Listener {
 
     static String formatDuration(Duration duration) {
         long seconds = duration.toSeconds();
+        Messages msg = Messages.current();
         if (seconds < 60) {
-            return seconds + "s";
+            return msg.get("duration.short.seconds", seconds);
         }
         long minutes = seconds / 60;
         long rest = seconds % 60;
-        return rest == 0 ? minutes + "m" : minutes + "m " + rest + "s";
+        return rest == 0 ? msg.get("duration.short.minutes", minutes)
+                : msg.get("duration.short.minutesSeconds", minutes, rest);
     }
 
     private static AnsiColor colorFor(RiskLevel level) {

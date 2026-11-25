@@ -6,6 +6,7 @@ import com.phishnet.analyzer.WhoisClient;
 import com.phishnet.batch.ParallelScanner;
 import com.phishnet.batch.UrlScanner;
 import com.phishnet.history.HistoryDatabase;
+import com.phishnet.i18n.Messages;
 import com.phishnet.model.PhishNetConfig;
 import com.phishnet.queue.JobQueue;
 import com.phishnet.queue.QueueException;
@@ -55,8 +56,10 @@ final class QueueCommand implements Callable<Integer> {
     static final String PASSWORD_ENV = "PHISHNET_REDIS_PASSWORD";
     static final String USERNAME_ENV = "PHISHNET_REDIS_USERNAME";
 
-    static final String UNREACHABLE_HINT = "Is Redis running and reachable? For a local one: "
-            + "docker run -d --name phishnet-redis -p 6379:6379 redis";
+    /** Printed after a connection failure. */
+    static String unreachableHint() {
+        return Messages.text("queue.unreachableHint");
+    }
 
     /** Connects to the queue; replaced in tests. */
     @FunctionalInterface
@@ -69,7 +72,7 @@ final class QueueCommand implements Callable<Integer> {
 
     @Override
     public Integer call() {
-        throw new ParameterException(spec.commandLine(), "Missing required command: produce or worker");
+        throw new ParameterException(spec.commandLine(), Messages.text("cli.missingCommand.two", "produce", "worker"));
     }
 
     /** Everything that touches the outside world, swappable for tests. */
@@ -106,10 +109,10 @@ final class QueueCommand implements Callable<Integer> {
         RedisSettings settings(CommandSpec spec, Map<String, String> env) {
             if (port < 1 || port > 65535) {
                 throw new ParameterException(spec.commandLine(),
-                        "Invalid value for option '--redis-port': " + port + " is not a valid port (1-65535)");
+                        Messages.text("cli.invalid.port", "--redis-port", port, "1-65535"));
             }
             if (queue.isBlank()) {
-                throw new ParameterException(spec.commandLine(), "Invalid value for option '--queue': must not be empty");
+                throw new ParameterException(spec.commandLine(), Messages.text("cli.invalid.empty", "--queue"));
             }
             return new RedisSettings(host, port, env.get(USERNAME_ENV), env.get(PASSWORD_ENV), ssl, queue);
         }
@@ -150,12 +153,12 @@ final class QueueCommand implements Callable<Integer> {
             try {
                 targets = readTargets(Path.of(file));
             } catch (IOException e) {
-                String reason = e instanceof NoSuchFileException ? "file not found" : e.getMessage();
-                environment.err().println("Error: could not read " + file + ": " + reason);
+                String reason = e instanceof NoSuchFileException ? Messages.text("cli.fileNotFound") : e.getMessage();
+                environment.err().println(Messages.text("cli.error.read", file, reason));
                 return 1;
             }
             if (targets.isEmpty()) {
-                environment.out().println(quiet ? "0" : "Nothing to queue: " + file + " contains no URLs.");
+                environment.out().println(quiet ? "0" : Messages.text("queue.nothingToQueue", file));
                 return 0;
             }
 
@@ -168,15 +171,14 @@ final class QueueCommand implements Callable<Integer> {
             try (JobQueue queue = environment.connector().connect(settings)) {
                 waiting = queue.push(payloads);
             } catch (QueueException e) {
-                environment.err().println("Error: " + e.getMessage());
+                environment.err().println(Messages.text("cli.error", e.getMessage()));
                 if (!e.isFatal()) {
-                    environment.err().println(UNREACHABLE_HINT);
+                    environment.err().println(unreachableHint());
                 }
                 return 1;
             }
             environment.out().println(quiet ? Integer.toString(payloads.size())
-                    : "Queued " + payloads.size() + " job(s) on " + settings.describe() + "; " + waiting
-                    + " waiting in total. Start workers with: phishnet queue worker");
+                    : Messages.text("queue.queued", payloads.size(), settings.describe(), waiting));
             return 0;
         }
     }
@@ -259,8 +261,8 @@ final class QueueCommand implements Callable<Integer> {
         @Override
         public Integer call() throws InterruptedException {
             if (threads != null && (threads < 1 || threads > ParallelScanner.MAX_THREADS)) {
-                throw new ParameterException(spec.commandLine(), "Invalid value for option '--threads': " + threads
-                        + " (must be 1-" + ParallelScanner.MAX_THREADS + ")");
+                throw new ParameterException(spec.commandLine(), Messages.text("cli.invalid.range", "--threads",
+                        threads, 1, ParallelScanner.MAX_THREADS));
             }
             int threadCount = threads != null ? threads : ParallelScanner.defaultThreads();
             RedisSettings settings = redis.settings(spec, environment.env());
@@ -270,7 +272,7 @@ final class QueueCommand implements Callable<Integer> {
             try {
                 config = configPath != null ? ConfigLoader.load(Path.of(configPath)) : ConfigLoader.loadDefault();
             } catch (RuntimeException e) {
-                err.println("Error: could not load config: " + e.getMessage());
+                err.println(Messages.text("cli.error.config", e.getMessage()));
                 return 1;
             }
 
@@ -305,12 +307,11 @@ final class QueueCommand implements Callable<Integer> {
                     reporter.fatal(e);
                     return 1;
                 }
-                err.println("Warning: " + e.getMessage() + ". Retrying in the background (--retry)...");
+                err.println(Messages.text("queue.retrying", e.getMessage()));
             }
 
-            reporter.header("PhishNet queue worker: " + threadCount + " thread(s) taking jobs from "
-                    + settings.describe() + ". " + (exitWhenEmpty ? "Stops when the queue is empty."
-                    : "Press Ctrl+C to stop."));
+            reporter.header(Messages.text("queue.workerHeader", threadCount, settings.describe()) + " "
+                    + Messages.text(exitWhenEmpty ? "queue.stopsWhenEmpty" : "cli.pressCtrlC"));
 
             Thread hook = new Thread(worker::stop, "phishnet-queue-worker-shutdown");
             if (environment.installShutdownHook()) {

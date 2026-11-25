@@ -4,6 +4,7 @@ import com.phishnet.feeds.FeedRefreshResult;
 import com.phishnet.feeds.FeedStatus;
 import com.phishnet.feeds.ThreatFeedService;
 import com.phishnet.feeds.ThreatFeedSettings;
+import com.phishnet.i18n.Messages;
 import com.phishnet.model.PhishNetConfig;
 import com.phishnet.util.ConfigLoader;
 import picocli.CommandLine;
@@ -41,7 +42,7 @@ final class FeedsCommand implements Callable<Integer> {
 
     @Override
     public Integer call() {
-        throw new ParameterException(spec.commandLine(), "Missing required command: update or status");
+        throw new ParameterException(spec.commandLine(), Messages.text("cli.missingCommand.two", "update", "status"));
     }
 
     /**
@@ -81,7 +82,7 @@ final class FeedsCommand implements Callable<Integer> {
             try {
                 config = configPath != null ? ConfigLoader.load(Path.of(configPath)) : ConfigLoader.loadDefault();
             } catch (RuntimeException e) {
-                err.println("Error: could not load config: " + e.getMessage());
+                err.println(Messages.text("cli.error.config", e.getMessage()));
                 return null;
             }
             return services.apply(config.threatFeeds().withEnvironment(System.getenv()));
@@ -106,24 +107,24 @@ final class FeedsCommand implements Callable<Integer> {
             if (service == null) {
                 return 1;
             }
-            out.println("Updating threat feeds in " + service.cache().directory() + " ...");
+            out.println(Messages.text("feeds.updating", service.cache().directory()));
             List<FeedRefreshResult> results = service.refreshAll();
             boolean failed = false;
             for (FeedRefreshResult result : results) {
                 String name = result.source().displayName() + ":";
                 switch (result.outcome()) {
-                    case UPDATED -> out.println(String.format("  %-11s updated, %s", name,
-                            FeedStatus.entryCount(result.entries())));
-                    case SKIPPED -> out.println(String.format("  %-11s skipped (%s)", name, result.message()));
+                    case UPDATED -> out.println(String.format("  %-11s %s", name,
+                            Messages.text("feeds.result.updated", FeedStatus.entryCount(result.entries()))));
+                    case SKIPPED -> out.println(String.format("  %-11s %s", name,
+                            Messages.text("feeds.result.skipped", result.message())));
                     case FAILED -> {
                         failed = true;
-                        out.println(String.format("  %-11s FAILED: %s", name, result.message()));
+                        out.println(String.format("  %-11s %s", name, Messages.text("feeds.result.failed", result.message())));
                     }
                 }
             }
             if (failed) {
-                err.println("Some feeds could not be downloaded; scans keep using their previous cached copy, "
-                        + "if any.");
+                err.println(Messages.text("feeds.someFailed"));
             }
             return failed ? 1 : 0;
         }
@@ -148,35 +149,28 @@ final class FeedsCommand implements Callable<Integer> {
                 return 1;
             }
             Instant now = service.clock().instant();
-            out.println("Cache directory:  " + service.cache().directory());
-            out.println("Refresh interval: " + formatDuration(service.settings().refreshInterval()));
+            out.println(Messages.text("feeds.status.cacheDirectory", service.cache().directory()));
+            out.println(Messages.text("feeds.status.refreshInterval", formatDuration(service.settings().refreshInterval())));
             for (FeedStatus status : service.status()) {
                 out.println();
                 out.println(status.source().displayName());
-                out.println("  Status:       " + stateLine(status));
+                out.println("  " + Messages.text("feeds.status.state", stateLine(status)));
                 if (status.state().available() || status.state() == FeedStatus.State.MISSING) {
-                    out.println("  Last refresh: " + (status.refreshedAt() == null ? "never"
-                            : status.refreshedAt() + " (" + formatDuration(Duration.between(status.refreshedAt(), now))
-                            + " ago)"));
-                    out.println(String.format("  Entries:      %,d", status.entries()));
+                    out.println("  " + Messages.text("feeds.status.lastRefresh", status.refreshedAt() == null
+                            ? Messages.text("feeds.status.never")
+                            : Messages.text("feeds.status.ago", status.refreshedAt(),
+                                    formatDuration(Duration.between(status.refreshedAt(), now)))));
+                    out.println("  " + Messages.text("feeds.status.entries", String.format("%,d", status.entries())));
                 }
                 if (status.lastError() != null) {
-                    out.println("  Last error:   " + status.lastError());
+                    out.println("  " + Messages.text("feeds.status.lastError", status.lastError()));
                 }
             }
             return 0;
         }
 
         private static String stateLine(FeedStatus status) {
-            return switch (status.state()) {
-                case FRESH -> "fresh (cached and available to scans)";
-                case STALE -> "stale (cached copy still used by scans; refreshed on the next scan or "
-                        + "`phishnet feeds update`)";
-                case MISSING -> "missing (nothing cached yet, so scans skip this feed; run `phishnet feeds update`)";
-                case DISABLED -> "disabled in the config";
-                case NOT_CONFIGURED -> "not configured: " + status.detail();
-                case OFF -> "off: " + status.detail();
-            };
+            return Messages.text("feeds.state." + status.state().name(), status.detail());
         }
     }
 
@@ -196,6 +190,6 @@ final class FeedsCommand implements Callable<Integer> {
     }
 
     private static String plural(long count, String unit) {
-        return count + " " + unit + (count == 1 ? "" : "s");
+        return Messages.current().plural("duration." + unit, count);
     }
 }

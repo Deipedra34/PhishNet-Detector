@@ -264,7 +264,7 @@ public final class Main implements Callable<Integer> {
             String[] monitorArgs = Arrays.copyOfRange(args, 1, args.length);
             String passwordError = MonitorCommand.passwordValueError(monitorArgs);
             if (passwordError != null) {
-                err.println("Error: " + passwordError);
+                err.println(Messages.text("cli.error", passwordError));
                 return 2;
             }
             return execute(monitorCommandLine(new MonitorCommand(out, err)), monitorArgs, out, err);
@@ -301,7 +301,9 @@ public final class Main implements Callable<Integer> {
 
     /** The {@code monitor} command, accepting "--protocol pop3" / "--act-on high" in any case. */
     static CommandLine monitorCommandLine(MonitorCommand command) {
-        return new CommandLine(command).setCaseInsensitiveEnumValuesAllowed(true);
+        CommandLine cmd = new CommandLine(command).setCaseInsensitiveEnumValuesAllowed(true);
+        MonitorCommand.localizePasswordPrompt(cmd.getCommandSpec());
+        return cmd;
     }
 
     /** Applies the shared stream/color/error-handling setup, then parses and runs {@code cmd}. */
@@ -323,7 +325,7 @@ public final class Main implements Callable<Integer> {
             // Some picocli exceptions (e.g. a required ArgGroup violation) already bake an
             // "Error: " prefix into getMessage(); avoid doubling it up for those.
             String message = ex.getMessage();
-            errWriter.println(message.startsWith("Error: ") ? message : "Error: " + message);
+            errWriter.println(message.startsWith("Error: ") ? message : Messages.text("cli.error", message));
             errWriter.println();
             ex.getCommandLine().usage(errWriter, ex.getCommandLine().getColorScheme());
             return ex.getCommandLine().getCommandSpec().exitCodeOnInvalidInput();
@@ -335,8 +337,8 @@ public final class Main implements Callable<Integer> {
     @Override
     public Integer call() {
         if (batch.threads != null && (batch.threads < 1 || batch.threads > ParallelScanner.MAX_THREADS)) {
-            throw new ParameterException(spec.commandLine(), "Invalid value for option '--threads': "
-                    + batch.threads + " (must be 1-" + ParallelScanner.MAX_THREADS + ")");
+            throw new ParameterException(spec.commandLine(), Messages.text("cli.invalid.range", "--threads",
+                    batch.threads, 1, ParallelScanner.MAX_THREADS));
         }
         int threads = batch.threads != null ? batch.threads : ParallelScanner.defaultThreads();
 
@@ -346,7 +348,7 @@ public final class Main implements Callable<Integer> {
                     ? ConfigLoader.load(Path.of(configPath))
                     : ConfigLoader.loadDefault();
         } catch (RuntimeException e) {
-            err.println("Error: could not load config: " + e.getMessage());
+            err.println(Messages.text("cli.error.config", e.getMessage()));
             return 1;
         }
 
@@ -404,7 +406,7 @@ public final class Main implements Callable<Integer> {
                         reporter, historyWriter, historyDb, htmlReportWriter, output.json, out, progress, threads);
             }
         } catch (IOException e) {
-            err.println("Error: " + e.getMessage());
+            err.println(Messages.text("cli.error", e.getMessage()));
             return 1;
         }
     }
@@ -517,7 +519,7 @@ public final class Main implements Callable<Integer> {
                     progress::onProgress);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new IOException("batch scan interrupted", e);
+            throw new IOException(Messages.text("cli.batchInterrupted"), e);
         }
         if (total > 0) {
             progress.onComplete();

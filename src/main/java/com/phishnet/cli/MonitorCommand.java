@@ -3,6 +3,7 @@ package com.phishnet.cli;
 import com.phishnet.analyzer.EmailAnalyzer;
 import com.phishnet.analyzer.UrlAnalyzer;
 import com.phishnet.history.HistoryDatabase;
+import com.phishnet.i18n.Messages;
 import com.phishnet.mail.ImapMailSource;
 import com.phishnet.mail.MailMonitorService;
 import com.phishnet.mail.MailProtocol;
@@ -19,6 +20,7 @@ import com.phishnet.util.ConfigLoader;
 import picocli.CommandLine.ArgGroup;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Model.CommandSpec;
+import picocli.CommandLine.Model.OptionSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.ParameterException;
 import picocli.CommandLine.Spec;
@@ -196,7 +198,7 @@ final class MonitorCommand implements Callable<Integer> {
         validate();
         String user = username != null ? username : environment.get(USERNAME_ENV);
         if (user == null || user.isBlank()) {
-            throw usageError("Missing username: pass --username or set " + USERNAME_ENV);
+            throw usageError(Messages.text("monitor.error.username", USERNAME_ENV));
         }
         int serverPort = port != null ? port : MailServerSettings.defaultPort(protocol, encryption);
 
@@ -204,7 +206,7 @@ final class MonitorCommand implements Callable<Integer> {
         try {
             config = configPath != null ? ConfigLoader.load(Path.of(configPath)) : ConfigLoader.loadDefault();
         } catch (RuntimeException e) {
-            err.println("Error: could not load config: " + e.getMessage());
+            err.println(Messages.text("cli.error.config", e.getMessage()));
             return 1;
         }
 
@@ -225,13 +227,13 @@ final class MonitorCommand implements Callable<Integer> {
         OutputLevel level = verbosity.quiet ? OutputLevel.QUIET
                 : verbosity.verbose ? OutputLevel.VERBOSE : OutputLevel.NORMAL;
         String waitDescription = protocol == MailProtocol.POP3
-                ? "polling every " + pollSeconds + "s - POP3 can't push new mail"
-                : "polling every " + pollSeconds + "s - the server doesn't support IDLE";
+                ? Messages.text("monitor.polling.pop3", pollSeconds)
+                : Messages.text("monitor.polling.noIdle", pollSeconds);
         MonitorReporter reporter = new MonitorReporter(out, err, level, ColorSupport.isEnabled(noColor), clock,
                 waitDescription);
 
         if (encryption == Security.NONE) {
-            err.println("Warning: --allow-plaintext sends your password and mail over the network unencrypted.");
+            err.println(Messages.text("monitor.plaintextWarning"));
         }
         reporter.header(header(settings, actions, csvFile, database));
 
@@ -268,29 +270,27 @@ final class MonitorCommand implements Callable<Integer> {
     /** Option combinations picocli can't check on its own. */
     private void validate() {
         if (port != null && (port < 1 || port > 65535)) {
-            throw usageError("Invalid value for option '--port': " + port + " is not a valid port (1-65535)");
+            throw usageError(Messages.text("cli.invalid.port", "--port", port, "1-65535"));
         }
         if (pollSeconds < MIN_POLL_SECONDS) {
-            throw usageError("Invalid value for option '--poll-interval': must be at least "
-                    + MIN_POLL_SECONDS + " seconds");
+            throw usageError(Messages.text("monitor.error.pollInterval", MIN_POLL_SECONDS));
         }
         if (actOn == RiskLevel.LOW) {
-            throw usageError("Invalid value for option '--act-on': use MEDIUM or HIGH "
-                    + "(LOW would treat every message as suspicious)");
+            throw usageError(Messages.text("monitor.error.actOn"));
         }
         if (moveToFolder != null && moveToFolder.isBlank()) {
-            throw usageError("Invalid value for option '--move-to-folder': the folder name must not be empty");
+            throw usageError(Messages.text("monitor.error.moveToFolderEmpty"));
         }
         if (protocol == MailProtocol.POP3) {
             if (flagSuspicious || moveToFolder != null) {
-                throw usageError("--flag-suspicious and --move-to-folder need IMAP: POP3 has no flags or folders");
+                throw usageError(Messages.text("monitor.error.pop3Actions"));
             }
             if (!MailServerSettings.DEFAULT_FOLDER.equalsIgnoreCase(folder)) {
-                throw usageError("--folder needs IMAP: POP3 only has INBOX");
+                throw usageError(Messages.text("monitor.error.pop3Folder"));
             }
         }
         if (moveToFolder != null && moveToFolder.equalsIgnoreCase(folder)) {
-            throw usageError("--move-to-folder must be a different folder than the one being watched (" + folder + ")");
+            throw usageError(Messages.text("monitor.error.sameFolder", folder));
         }
     }
 
@@ -302,12 +302,11 @@ final class MonitorCommand implements Callable<Integer> {
             if (fromEnv != null && !fromEnv.isEmpty()) {
                 return fromEnv;
             }
-            chars = prompt.readPassword((oauth2 ? "OAuth2 access token" : "Password") + " for " + user + " on "
-                    + host + ":" + serverPort + " (input hidden): ");
+            chars = prompt.readPassword(Messages.text(oauth2 ? "monitor.prompt.token" : "monitor.prompt.password",
+                    user, host + ":" + serverPort) + " ");
         }
         if (chars == null || chars.length == 0) {
-            throw usageError("No password: set " + PASSWORD_ENV + ", or run in a terminal (or with --password) "
-                    + "to be prompted for it");
+            throw usageError(Messages.text("monitor.error.noPassword", PASSWORD_ENV));
         }
         String secret = new String(chars);
         Arrays.fill(chars, '\0');
@@ -317,20 +316,22 @@ final class MonitorCommand implements Callable<Integer> {
     private List<String> header(MailServerSettings settings, MonitorActions actions, Path csvFile,
                                 HistoryDatabase database) {
         List<String> lines = new ArrayList<>();
-        lines.add("PhishNet is monitoring " + settings.folder() + " on " + settings.describe()
-                + " as " + settings.username());
-        String scope = actions.minLevel() == RiskLevel.HIGH ? "HIGH" : "MEDIUM and HIGH";
+        lines.add(Messages.text("monitor.header.watching", settings.folder(), settings.describe(),
+                settings.username()));
+        String scope = Messages.text(actions.minLevel() == RiskLevel.HIGH ? "monitor.scope.high"
+                : "monitor.scope.mediumHigh");
         if (actions.mutatesMailbox()) {
-            List<String> changes = new ArrayList<>();
-            if (actions.flagSuspicious()) {
-                changes.add("flagged");
+            String change;
+            if (actions.flagSuspicious() && actions.moveToFolder() != null) {
+                change = Messages.text("monitor.change.flagAndMove", actions.moveToFolder());
+            } else if (actions.flagSuspicious()) {
+                change = Messages.text("monitor.change.flag");
+            } else {
+                change = Messages.text("monitor.change.move", actions.moveToFolder());
             }
-            if (actions.moveToFolder() != null) {
-                changes.add("moved to \"" + actions.moveToFolder() + "\"");
-            }
-            lines.add("Suspicious mail (" + scope + " risk) is " + String.join(" and ", changes) + ".");
+            lines.add(Messages.text("monitor.header.actions", scope, change));
         } else {
-            lines.add("Read-only: the mailbox is never changed. Suspicious mail (" + scope + " risk) is reported.");
+            lines.add(Messages.text("monitor.header.readOnly", scope));
         }
         List<String> targets = new ArrayList<>();
         if (!noHistory) {
@@ -340,10 +341,12 @@ final class MonitorCommand implements Callable<Integer> {
             targets.add(database.file().toString());
         }
         if (!targets.isEmpty()) {
-            lines.add("Recording " + (actions.recordAll() ? "every scanned message" : "suspicious mail")
-                    + " to " + String.join(" and ", targets) + ".");
+            String where = targets.size() == 1 ? targets.get(0)
+                    : Messages.text("monitor.both", targets.get(0), targets.get(1));
+            lines.add(Messages.text(actions.recordAll() ? "monitor.header.recordAll" : "monitor.header.recordSuspicious",
+                    where));
         }
-        lines.add("Only mail arriving from now on is scanned. Press Ctrl+C to stop.");
+        lines.add(Messages.text("monitor.header.fromNow") + " " + Messages.text("cli.pressCtrlC"));
         return lines;
     }
 
@@ -359,11 +362,29 @@ final class MonitorCommand implements Callable<Integer> {
             boolean inline = args[i].startsWith("--password=");
             boolean separate = args[i].equals("--password") && i + 1 < args.length && !args[i + 1].startsWith("-");
             if (inline || separate) {
-                return "--password doesn't take a value on the command line (it would end up in your shell "
-                        + "history). Use --password alone to be prompted, or set " + PASSWORD_ENV + ".";
+                return Messages.text("monitor.error.passwordValue", PASSWORD_ENV);
             }
         }
         return null;
+    }
+
+    /**
+     * Picocli takes an interactive option's prompt only from its annotation, so --password
+     * is rebuilt with the prompt in the run's language. The options declared after it are
+     * re-added behind it, keeping the help in declaration order.
+     */
+    static void localizePasswordPrompt(CommandSpec spec) {
+        String prompt = Messages.text("monitor.passwordPrompt") + " ";
+        OptionSpec password = spec.findOption("--password");
+        if (password == null || password.prompt().equals(prompt)) {
+            return;
+        }
+        List<OptionSpec> ungrouped = spec.options().stream().filter(option -> option.group() == null).toList();
+        List<OptionSpec> tail = ungrouped.subList(ungrouped.indexOf(password), ungrouped.size());
+        tail.forEach(spec::remove);
+        for (OptionSpec option : tail) {
+            spec.addOption(option == password ? option.toBuilder().prompt(prompt).build() : option);
+        }
     }
 
     private ParameterException usageError(String message) {

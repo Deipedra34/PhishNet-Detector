@@ -3,6 +3,7 @@ package com.phishnet.cli;
 import com.phishnet.history.HistoryDatabase;
 import com.phishnet.history.HistoryEntry;
 import com.phishnet.history.HistoryFilter;
+import com.phishnet.i18n.Messages;
 import com.phishnet.model.RiskLevel;
 import com.phishnet.util.ColorSupport;
 import picocli.CommandLine;
@@ -47,7 +48,7 @@ final class HistoryCommand implements Callable<Integer> {
 
     @Override
     public Integer call() {
-        throw new ParameterException(spec.commandLine(), "Missing required command: list, search, or stats");
+        throw new ParameterException(spec.commandLine(), Messages.text("cli.missingCommand.three", "list", "search", "stats"));
     }
 
     /** The {@code history} command with its subcommands wired to the given streams. */
@@ -106,7 +107,7 @@ final class HistoryCommand implements Callable<Integer> {
                 run(database, reporter);
                 return 0;
             } catch (SQLException | RuntimeException e) {
-                err.println("Error: could not read scan history database " + file + ": " + e.getMessage());
+                err.println(Messages.text("history.error.read", file, e.getMessage()));
                 return 1;
             }
         }
@@ -127,7 +128,7 @@ final class HistoryCommand implements Callable<Integer> {
 
         void requireNonNegative(String option, int value) {
             if (value < 0) {
-                throw usageError("Invalid value for option '" + option + "': " + value + " (must be 0 or more)");
+                throw usageError(Messages.text("cli.invalid.nonNegative", option, value));
             }
         }
 
@@ -162,7 +163,7 @@ final class HistoryCommand implements Callable<Integer> {
         @Override
         void run(HistoryDatabase database, HistoryReporter reporter) throws SQLException {
             List<HistoryEntry> entries = database.search(HistoryFilter.recent(limit));
-            reporter.printEntries(entries, database.file(), "No scans recorded yet");
+            reporter.printEntries(entries, database.file(), Messages.text("history.noScans"));
         }
     }
 
@@ -200,7 +201,7 @@ final class HistoryCommand implements Callable<Integer> {
         void validate() {
             requireNonNegative("--limit", limit);
             if (since != null && until != null && since.isAfter(until)) {
-                throw usageError("--since (" + since + ") must not be after --until (" + until + ")");
+                throw usageError(Messages.text("history.error.sinceAfterUntil", since, until));
             }
         }
 
@@ -212,7 +213,7 @@ final class HistoryCommand implements Callable<Integer> {
             Instant to = until == null ? null : until.plusDays(1).atStartOfDay(zone()).toInstant();
             String text = target == null ? null : target.trim();
             HistoryFilter filter = new HistoryFilter(text, risk, type, from, to, limit);
-            reporter.printEntries(database.search(filter), database.file(), "No matching scans");
+            reporter.printEntries(database.search(filter), database.file(), Messages.text("history.noMatches"));
         }
     }
 
@@ -249,7 +250,7 @@ final class HistoryCommand implements Callable<Integer> {
             try {
                 return LocalDate.parse(value);
             } catch (DateTimeParseException e) {
-                throw new TypeConversionException("'" + value + "' is not a date in YYYY-MM-DD format");
+                throw new TypeConversionException(Messages.text("history.error.date", value));
             }
         }
     }

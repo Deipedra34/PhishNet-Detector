@@ -1,5 +1,6 @@
 package com.phishnet.cli;
 
+import com.phishnet.i18n.Messages;
 import com.phishnet.model.DomainAgeResult;
 import com.phishnet.model.RiskLevel;
 import com.phishnet.model.RiskScore;
@@ -35,6 +36,7 @@ public final class HtmlReportWriter {
     private final boolean enabled;
     private final String toolVersion;
     private final PrintStream err;
+    private final Messages msg = Messages.current();
 
     /**
      * @param file        destination HTML file (parent directories are created if missing)
@@ -66,7 +68,7 @@ public final class HtmlReportWriter {
             }
             Files.writeString(file, html, StandardCharsets.UTF_8);
         } catch (IOException e) {
-            err.println("Warning: could not write HTML report to " + file + ": " + e.getMessage());
+            err.println(msg.get("html.writeFailed", file, e.getMessage()));
         }
     }
 
@@ -74,7 +76,7 @@ public final class HtmlReportWriter {
     String render(List<AnalysisEntry> entries, Instant timestamp) {
         List<AnalysisEntry> sorted = sortedByRisk(entries);
         StringBuilder html = new StringBuilder();
-        html.append("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n");
+        html.append("<!DOCTYPE html>\n<html lang=\"").append(msg.locale().getLanguage()).append("\">\n<head>\n");
         html.append(renderHead());
         html.append("</head>\n<body>\n");
         html.append(renderHeader(entries.size(), timestamp));
@@ -86,16 +88,16 @@ public final class HtmlReportWriter {
 
     private String renderHead() {
         return "  <meta charset=\"UTF-8\">\n"
-                + "  <title>PhishNet Detector Scan Report</title>\n"
+                + "  <title>" + escapeHtml(msg.get("html.title")) + "</title>\n"
                 + "  <style>\n" + CSS + "  </style>\n";
     }
 
     private String renderHeader(int total, Instant timestamp) {
         return "  <header>\n"
                 + "    <h1>PhishNet Detector</h1>\n"
-                + "    <p class=\"meta\">Version " + escapeHtml(toolVersion)
-                + " &middot; Scan run at " + escapeHtml(timestamp.toString())
-                + " &middot; " + total + " item" + (total == 1 ? "" : "s") + " scanned</p>\n"
+                + "    <p class=\"meta\">" + escapeHtml(msg.get("html.version", toolVersion))
+                + " &middot; " + escapeHtml(msg.get("html.scanRunAt", timestamp))
+                + " &middot; " + escapeHtml(msg.plural("html.itemsScanned", total)) + "</p>\n"
                 + "  </header>\n";
     }
 
@@ -107,11 +109,11 @@ public final class HtmlReportWriter {
 
         StringBuilder sb = new StringBuilder();
         sb.append("  <section class=\"summary\">\n");
-        sb.append("    <h2>Summary</h2>\n");
+        sb.append("    <h2>").append(escapeHtml(msg.get("html.summary"))).append("</h2>\n");
         sb.append("    <div class=\"stat-row\">\n");
-        sb.append(renderStat("HIGH", high, total, "risk-high"));
-        sb.append(renderStat("MEDIUM", medium, total, "risk-medium"));
-        sb.append(renderStat("LOW", low, total, "risk-low"));
+        sb.append(renderStat(msg.get("risk.HIGH"), high, total, "risk-high"));
+        sb.append(renderStat(msg.get("risk.MEDIUM"), medium, total, "risk-medium"));
+        sb.append(renderStat(msg.get("risk.LOW"), low, total, "risk-low"));
         sb.append("    </div>\n");
         sb.append("  </section>\n");
         return sb.toString();
@@ -125,7 +127,7 @@ public final class HtmlReportWriter {
         String pctText = String.format(Locale.ROOT, "%.1f%%", pct);
         return "      <div class=\"stat " + cssClass + "\">\n"
                 + "        <div class=\"stat-numbers\"><span class=\"stat-count\">" + count
-                + "</span> <span class=\"stat-label\">" + label + "</span> "
+                + "</span> <span class=\"stat-label\">" + escapeHtml(label) + "</span> "
                 + "<span class=\"stat-pct\">(" + pctText + ")</span></div>\n"
                 + "        <div class=\"bar-track\"><div class=\"bar-fill\" style=\"width:" + pctText
                 + ";\"></div></div>\n"
@@ -135,10 +137,13 @@ public final class HtmlReportWriter {
     private String renderTable(List<AnalysisEntry> sortedEntries) {
         StringBuilder sb = new StringBuilder();
         sb.append("  <section class=\"results\">\n");
-        sb.append("    <h2>Results</h2>\n");
+        sb.append("    <h2>").append(escapeHtml(msg.get("html.results"))).append("</h2>\n");
         sb.append("    <table>\n");
-        sb.append("      <thead><tr><th>Target</th><th>Type</th><th>Score</th>"
-                + "<th>Risk</th><th>Domain Age</th><th>Signals</th></tr></thead>\n");
+        sb.append("      <thead><tr>");
+        for (String column : new String[] {"target", "type", "score", "risk", "domainAge", "signals"}) {
+            sb.append("<th>").append(escapeHtml(msg.get("html.column." + column))).append("</th>");
+        }
+        sb.append("</tr></thead>\n");
         sb.append("      <tbody>\n");
         for (AnalysisEntry entry : sortedEntries) {
             sb.append(renderRow(entry));
@@ -155,10 +160,10 @@ public final class HtmlReportWriter {
         StringBuilder sb = new StringBuilder();
         sb.append("        <tr class=\"").append(cssClass).append("\">\n");
         sb.append("          <td class=\"target\">").append(escapeHtml(entry.label())).append("</td>\n");
-        sb.append("          <td>").append(entry.type().name()).append("</td>\n");
+        sb.append("          <td>").append(escapeHtml(msg.get("type." + entry.type().name()))).append("</td>\n");
         sb.append("          <td>").append(score.score()).append("/100</td>\n");
         sb.append("          <td><span class=\"badge ").append(cssClass).append("\">")
-                .append(score.level().name()).append("</span></td>\n");
+                .append(escapeHtml(msg.get("risk." + score.level().name()))).append("</span></td>\n");
         sb.append("          <td>").append(renderDomainAge(entry.domainAge())).append("</td>\n");
         sb.append("          <td>").append(renderSignals(score.signals())).append("</td>\n");
         sb.append("        </tr>\n");
@@ -166,19 +171,19 @@ public final class HtmlReportWriter {
     }
 
     /** Formatted age, "unknown" for a failed lookup, or a muted dash when no lookup was done. */
-    private static String renderDomainAge(DomainAgeResult domainAge) {
+    private String renderDomainAge(DomainAgeResult domainAge) {
         if (domainAge.isSkipped()) {
             return "<span class=\"none\">&mdash;</span>";
         }
         if (!domainAge.isKnown()) {
-            return "<span class=\"none\">unknown</span>";
+            return "<span class=\"none\">" + escapeHtml(msg.get("html.unknown")) + "</span>";
         }
         return escapeHtml(domainAge.formatAge());
     }
 
     private String renderSignals(List<Signal> signals) {
         if (signals.isEmpty()) {
-            return "<span class=\"none\">none</span>";
+            return "<span class=\"none\">" + escapeHtml(msg.get("html.none")) + "</span>";
         }
         StringBuilder sb = new StringBuilder("<ul class=\"signals\">");
         for (Signal signal : signals) {

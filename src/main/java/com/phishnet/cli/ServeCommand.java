@@ -7,6 +7,7 @@ import com.phishnet.api.ScanService;
 import com.phishnet.feeds.ThreatFeedService;
 import com.phishnet.feeds.ThreatFeedSettings;
 import com.phishnet.history.HistoryDatabase;
+import com.phishnet.i18n.Messages;
 import com.phishnet.model.PhishNetConfig;
 import com.phishnet.util.ConfigLoader;
 import picocli.CommandLine.Command;
@@ -112,20 +113,19 @@ final class ServeCommand implements Callable<Integer> {
     public Integer call() {
         if (port < 0 || port > 65535) {
             throw new ParameterException(spec.commandLine(),
-                    "Invalid value for option '--port': " + port + " is not a valid port (0-65535)");
+                    Messages.text("cli.invalid.port", "--port", port, "0-65535"));
         }
         if (rateLimit != null && rateLimit < 0) {
             throw new ParameterException(spec.commandLine(),
-                    "Invalid value for option '--rate-limit': " + rateLimit + " (must be 0 or more)");
+                    Messages.text("cli.invalid.nonNegative", "--rate-limit", rateLimit));
         }
         if (noAuth && regenerateKey) {
             throw new ParameterException(spec.commandLine(),
-                    "--regenerate-key and --no-auth can't be combined: with --no-auth no key is used");
+                    Messages.text("serve.error.regenerateNoAuth"));
         }
         String envKey = environment.get(ApiKeyStore.KEY_ENV);
         if (regenerateKey && envKey != null && !envKey.isBlank()) {
-            err.println("Error: --regenerate-key can't replace a key set through $" + ApiKeyStore.KEY_ENV
-                    + "; set that variable to a new value instead");
+            err.println(Messages.text("serve.error.regenerateEnv", ApiKeyStore.KEY_ENV));
             return 1;
         }
 
@@ -135,7 +135,7 @@ final class ServeCommand implements Callable<Integer> {
                     ? ConfigLoader.load(Path.of(configPath))
                     : ConfigLoader.loadDefault();
         } catch (RuntimeException e) {
-            err.println("Error: could not load config: " + e.getMessage());
+            err.println(Messages.text("cli.error.config", e.getMessage()));
             return 1;
         }
 
@@ -144,8 +144,7 @@ final class ServeCommand implements Callable<Integer> {
             if (dashboardDir != null) {
                 dashboard = Path.of(dashboardDir);
                 if (!ApiServer.isDashboardDirectory(dashboard)) {
-                    err.println("Error: --dashboard " + dashboardDir + " has no index.html "
-                            + "(build the dashboard with: cd dashboard && npm install && npm run build)");
+                    err.println(Messages.text("serve.error.noIndex", dashboardDir));
                     return 1;
                 }
             } else {
@@ -161,8 +160,8 @@ final class ServeCommand implements Callable<Integer> {
             try {
                 apiKey = regenerateKey ? ApiKeyStore.regenerate(keyFile) : ApiKeyStore.loadOrCreate(keyFile, envKey);
             } catch (IOException | IllegalArgumentException e) {
-                err.println("Error: could not " + (regenerateKey ? "replace" : "load") + " the API key: "
-                        + e.getMessage());
+                err.println(Messages.text(regenerateKey ? "serve.error.keyReplace" : "serve.error.keyLoad",
+                        e.getMessage()));
                 return 1;
             }
         }
@@ -183,13 +182,13 @@ final class ServeCommand implements Callable<Integer> {
         try {
             server.start(port);
         } catch (RuntimeException e) {
-            err.println("Error: could not start API server on port " + port + ": " + e.getMessage());
+            err.println(Messages.text("serve.error.start", port, e.getMessage()));
             return 1;
         }
         Runtime.getRuntime().addShutdownHook(new Thread(server::stop, "phishnet-api-shutdown"));
         startedServer = server;
 
-        out.println("PhishNet API listening on http://localhost:" + server.port() + " (Ctrl+C to stop)");
+        out.println(Messages.text("serve.listening", server.port()));
         out.println("  GET  /api/health");
         out.println("  POST /api/scan/url");
         out.println("  POST /api/scan/email");
@@ -198,19 +197,17 @@ final class ServeCommand implements Callable<Integer> {
         out.println("  GET  /api/feeds/status");
         out.println("  GET  /api/auth/check");
         if (history != null) {
-            out.println("Recording scans to " + history.file());
+            out.println(Messages.text("serve.recording", history.file()));
         }
         printApiKey(apiKey, server.port());
         int limit = effectiveRateLimit(config);
         out.println(limit > 0
-                ? "Rate limit: " + limit + " scan requests per minute per client"
-                : "Rate limit: off");
+                ? Messages.text("serve.rateLimit", limit)
+                : Messages.text("serve.rateLimit.off"));
         if (dashboard != null) {
-            out.println("Web dashboard: http://localhost:" + server.port() + "/ (from " + dashboard.toAbsolutePath()
-                    + ")");
+            out.println(Messages.text("serve.dashboard", server.port(), dashboard.toAbsolutePath()));
         } else if (!noDashboard) {
-            out.println("Web dashboard: not found, serving the API only "
-                    + "(build it with: cd dashboard && npm install && npm run build)");
+            out.println(Messages.text("serve.dashboard.missing"));
         }
         return 0;
     }
@@ -228,29 +225,25 @@ final class ServeCommand implements Callable<Integer> {
     /** Shows a newly generated key once, in full; otherwise only says where the key comes from. */
     private void printApiKey(ApiKeyStore.LoadedKey apiKey, int listeningPort) {
         if (apiKey == null) {
-            err.println("Warning: API authentication is disabled (--no-auth): anyone who can reach port "
-                    + listeningPort + " can scan and read the scan history.");
+            err.println(Messages.text("serve.noAuthWarning", listeningPort));
             return;
         }
         switch (apiKey.source()) {
             case CREATED, REGENERATED -> {
                 out.println();
-                out.println((apiKey.source() == ApiKeyStore.Source.REGENERATED
-                        ? "Replaced the API key with a new one" : "Generated a new API key")
-                        + " and saved it to " + apiKey.file().toAbsolutePath() + ":");
+                out.println(Messages.text(apiKey.source() == ApiKeyStore.Source.REGENERATED
+                        ? "serve.key.replaced" : "serve.key.generated", apiKey.file().toAbsolutePath()));
                 out.println();
                 out.println("    " + apiKey.key());
                 out.println();
-                out.println("Clients (the browser extension, the web dashboard, scripts) must send it in the "
-                        + ApiServer.API_KEY_HEADER + " header.");
-                out.println("It is shown only this once; to see it again, read that file. "
-                        + "To replace it: phishnet serve --regenerate-key");
+                out.println(Messages.text("serve.key.clients", ApiServer.API_KEY_HEADER));
+                out.println(Messages.text("serve.key.shownOnce"));
                 out.println();
             }
-            case FILE -> out.println("API key required (" + ApiServer.API_KEY_HEADER + " header): from "
-                    + apiKey.file().toAbsolutePath());
-            case ENVIRONMENT -> out.println("API key required (" + ApiServer.API_KEY_HEADER + " header): from $"
-                    + ApiKeyStore.KEY_ENV);
+            case FILE -> out.println(Messages.text("serve.key.required", ApiServer.API_KEY_HEADER,
+                    apiKey.file().toAbsolutePath()));
+            case ENVIRONMENT -> out.println(Messages.text("serve.key.required", ApiServer.API_KEY_HEADER,
+                    "$" + ApiKeyStore.KEY_ENV));
         }
     }
 

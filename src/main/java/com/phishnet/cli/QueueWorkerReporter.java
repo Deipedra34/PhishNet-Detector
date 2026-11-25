@@ -1,6 +1,7 @@
 package com.phishnet.cli;
 
 import com.phishnet.batch.UrlScanner;
+import com.phishnet.i18n.Messages;
 import com.phishnet.model.DomainAgeResult;
 import com.phishnet.model.RiskLevel;
 import com.phishnet.model.Signal;
@@ -36,6 +37,7 @@ final class QueueWorkerReporter implements QueueWorker.Listener {
     private final OutputLevel level;
     private final boolean color;
     private final Clock clock;
+    private final Messages msg = Messages.current();
 
     private int scanned;
     private int high;
@@ -65,27 +67,27 @@ final class QueueWorkerReporter implements QueueWorker.Listener {
         } else if (risk == RiskLevel.MEDIUM) {
             medium++;
         }
-        String target = MonitorReporter.clean(result.url(), "(empty)");
+        String target = MonitorReporter.clean(result.url(), msg.get("common.empty"));
         if (level == OutputLevel.QUIET) {
             out.println(risk.name() + " " + result.score().score() + " " + target);
             return;
         }
-        String verdict = risk.name() + " " + result.score().score() + "/100";
+        String verdict = msg.get("risk." + risk.name()) + " " + result.score().score() + "/100";
         out.println("[" + now() + "] " + AnsiColor.apply(verdict, color, AnsiColor.BOLD, colorFor(risk)) + "  " + target);
         if (level == OutputLevel.VERBOSE) {
-            out.println("  Job " + (job.id().isEmpty() ? "(no id)" : job.id()) + " on "
-                    + Thread.currentThread().getName() + waited(job));
+            out.println("  " + msg.get("queue.job", job.id().isEmpty() ? msg.get("queue.noId") : job.id(),
+                    Thread.currentThread().getName()) + waited(job));
             DomainAgeResult age = result.domainAge();
             if (!age.isSkipped()) {
-                out.println("  Domain age: " + age.formatAge());
+                out.println("  " + msg.get("queue.domainAge", age.formatAge()));
             }
             for (Signal signal : result.score().signals()) {
                 out.println("  [" + signal.id() + "] " + signal.description()
                         + (signal.evidence().isEmpty() ? "" : " (" + MonitorReporter.clean(signal.evidence(), "") + ")"));
             }
         } else if (risk != RiskLevel.LOW && !result.score().signals().isEmpty()) {
-            out.println("  signals: " + result.score().signals().stream().map(Signal::id)
-                    .collect(Collectors.joining(", ")));
+            out.println("  " + msg.get("queue.signals", result.score().signals().stream().map(Signal::id)
+                    .collect(Collectors.joining(", "))));
         }
     }
 
@@ -94,46 +96,49 @@ final class QueueWorkerReporter implements QueueWorker.Listener {
             return "";
         }
         Duration waited = Duration.between(job.enqueuedAt(), clock.instant());
-        return waited.isNegative() ? "" : ", queued " + MonitorReporter.formatDuration(waited) + " ago";
+        return waited.isNegative() ? "" : msg.get("queue.queuedAgo", MonitorReporter.formatDuration(waited));
     }
 
     @Override
     public synchronized void invalidJob(String payload, String reason) {
         skipped++;
-        String shown = MonitorReporter.clean(payload, "(empty)");
+        String shown = MonitorReporter.clean(payload, msg.get("common.empty"));
         if (shown.length() > MAX_PAYLOAD_SHOWN) {
             shown = shown.substring(0, MAX_PAYLOAD_SHOWN) + "…";
         }
-        err.println("Warning: skipped an invalid job (" + reason + "): " + shown);
+        err.println(msg.get("queue.invalidJob", reason, shown));
     }
 
     @Override
     public synchronized void jobFailed(ScanJob job, RuntimeException error) {
         skipped++;
-        err.println("Warning: could not scan " + MonitorReporter.clean(job.target(), "(empty)") + ": "
-                + MonitorReporter.describe(error));
+        err.println(msg.get("queue.scanFailed", MonitorReporter.clean(job.target(), msg.get("common.empty")),
+                MonitorReporter.describe(error)));
     }
 
     @Override
     public synchronized void connectionLost(QueueException error, Duration retryIn, int attempt) {
-        err.println("[" + now() + "] Queue connection problem on " + Thread.currentThread().getName() + ": "
-                + error.getMessage() + ". Retrying in " + MonitorReporter.formatDuration(retryIn)
-                + (attempt > 1 ? " (attempt " + attempt + ")" : "") + "...");
+        String thread = Thread.currentThread().getName();
+        String retry = MonitorReporter.formatDuration(retryIn);
+        err.println("[" + now() + "] " + (attempt > 1
+                ? msg.get("queue.connectionLost.attempt", thread, error.getMessage(), retry, attempt)
+                : msg.get("queue.connectionLost", thread, error.getMessage(), retry)));
     }
 
     @Override
     public synchronized void fatal(QueueException error) {
-        err.println("Error: " + error.getMessage());
+        err.println(msg.get("cli.error", error.getMessage()));
         if (!error.isFatal()) {
-            err.println(QueueCommand.UNREACHABLE_HINT);
-            err.println("Add --retry to keep trying instead of stopping.");
+            err.println(QueueCommand.unreachableHint());
+            err.println(msg.get("queue.retryHint"));
         }
     }
 
     synchronized void stopped() {
         if (level != OutputLevel.QUIET) {
-            out.println("[" + now() + "] Worker stopped. Scanned " + scanned + " job(s): " + high + " high, "
-                    + medium + " medium risk" + (skipped > 0 ? "; " + skipped + " skipped" : "") + ".");
+            out.println("[" + now() + "] " + (skipped > 0
+                    ? msg.get("queue.stopped.skipped", scanned, high, medium, skipped)
+                    : msg.get("queue.stopped", scanned, high, medium)));
         }
     }
 

@@ -3,6 +3,7 @@ package com.phishnet.cli;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import com.phishnet.i18n.Messages;
 import com.phishnet.model.RiskScore;
 import com.phishnet.model.Signal;
 
@@ -26,13 +27,14 @@ public final class ReportFormatter {
     }
 
     public String humanReadable(String label, RiskScore score) {
+        Messages msg = Messages.current();
         StringBuilder sb = new StringBuilder();
-        sb.append("Target: ").append(label).append('\n');
-        sb.append("Risk Score: ").append(score.score()).append("/100 (").append(score.level()).append(")\n");
+        sb.append(msg.get("report.target", label)).append('\n');
+        sb.append(msg.get("report.riskScore", score.score(), msg.get("risk." + score.level().name()))).append('\n');
         if (score.signals().isEmpty()) {
-            sb.append("Signals: none\n");
+            sb.append(msg.get("report.signals.none")).append('\n');
         } else {
-            sb.append("Signals:\n");
+            sb.append(msg.get("report.signals")).append('\n');
             for (Signal signal : score.signals()) {
                 sb.append("  - [").append(signal.id()).append("] ").append(signal.description());
                 if (!signal.evidence().isEmpty()) {
@@ -41,7 +43,7 @@ public final class ReportFormatter {
                 sb.append('\n');
             }
         }
-        sb.append("Recommendation: ").append(score.recommendation()).append('\n');
+        sb.append(msg.get("report.recommendation", score.recommendation())).append('\n');
         return sb.toString();
     }
 

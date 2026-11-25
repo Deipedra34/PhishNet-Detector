@@ -67,6 +67,11 @@ public final class Messages {
         current = messages;
     }
 
+    /** {@code current().get(key, args)}: the text in the language the CLI is printing in. */
+    public static String text(String key, Object... args) {
+        return current().get(key, args);
+    }
+
     /** The bundle itself, for picocli's help text. */
     public ResourceBundle bundle() {
         return bundle;
@@ -84,10 +89,34 @@ public final class Messages {
      */
     public String get(String key, Object... args) {
         String text = bundle.getString(key);
-        for (int i = 0; i < args.length; i++) {
-            text = text.replace("{" + i + "}", String.valueOf(args[i]));
+        if (args.length == 0 || text.indexOf('{') < 0) {
+            return text;
         }
-        return text;
+        // One pass, so a "{1}" inside an argument (say, an email subject) is left alone.
+        StringBuilder out = new StringBuilder(text.length() + 32);
+        int i = 0;
+        while (i < text.length()) {
+            char c = text.charAt(i);
+            int close = c == '{' ? text.indexOf('}', i) : -1;
+            int index = close > i + 1 && close <= i + 3 ? placeholderIndex(text.substring(i + 1, close)) : -1;
+            if (index >= 0 && index < args.length) {
+                out.append(args[index]);
+                i = close + 1;
+            } else {
+                out.append(c);
+                i++;
+            }
+        }
+        return out.toString();
+    }
+
+    private static int placeholderIndex(String digits) {
+        for (int i = 0; i < digits.length(); i++) {
+            if (digits.charAt(i) < '0' || digits.charAt(i) > '9') {
+                return -1;
+            }
+        }
+        return Integer.parseInt(digits);
     }
 
     /** {@code key + ".one"} when {@code count} is 1, otherwise {@code key + ".other"}. */

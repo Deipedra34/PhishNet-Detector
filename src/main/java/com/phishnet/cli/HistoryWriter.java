@@ -1,5 +1,6 @@
 package com.phishnet.cli;
 
+import com.phishnet.i18n.Messages;
 import com.phishnet.model.DomainAgeResult;
 import com.phishnet.model.RiskScore;
 import com.phishnet.model.Signal;
@@ -110,7 +111,7 @@ public final class HistoryWriter {
                 }
             } catch (IOException e) {
                 if (!warned) {
-                    err.println("Warning: could not write scan history to " + file + ": " + e.getMessage());
+                    err.println(Messages.text("history.csv.writeFailed", file, e.getMessage()));
                     warned = true;
                 }
             }
