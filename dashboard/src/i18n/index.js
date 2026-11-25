@@ -9,6 +9,7 @@
 
 import { Fragment, createElement, useSyncExternalStore } from "react";
 import en from "./en.json";
+import tr from "./tr.json";
 
 /** localStorage key holding the language picked in the header, next to the API settings. */
 export const LANGUAGE_STORAGE_KEY = "phishnet.language";
@@ -18,13 +19,13 @@ export const LANGUAGE_CHANGED_EVENT = "phishnet:language-changed";
 
 export const DEFAULT_LANGUAGE = "en";
 
-const DICTIONARIES = { en };
+const DICTIONARIES = { en, tr };
 
 /** Supported languages, as ISO 639 codes. */
 export const LANGUAGES = Object.keys(DICTIONARIES);
 
 /** Each language's name in that language, for the switcher. */
-export const LANGUAGE_NAMES = { en: "English" };
+export const LANGUAGE_NAMES = { en: "English", tr: "Türkçe" };
 
 /** The supported language for a tag such as "tr-TR", or null. */
 export function supportedLanguage(tag) {

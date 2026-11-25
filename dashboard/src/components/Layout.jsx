@@ -2,6 +2,7 @@ import { Link, NavLink, Outlet } from "react-router-dom";
 import { useI18n } from "../i18n/index.js";
 import ApiSettings from "./ApiSettings.jsx";
 import AuthGate from "./AuthGate.jsx";
+import LanguageSwitcher from "./LanguageSwitcher.jsx";
 
 const NAV_ITEMS = [
   { to: "/", label: "nav.scan", end: true },
@@ -34,6 +35,7 @@ export default function Layout() {
             </NavLink>
           ))}
         </nav>
+        <LanguageSwitcher />
       </header>
       <main className="app-main">
         <AuthGate>
