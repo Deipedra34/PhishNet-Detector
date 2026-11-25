@@ -13,10 +13,19 @@ import {
   setApiBaseUrl,
   setApiKey,
 } from "./lib/api.js";
+import {
+  AUTO_LANGUAGE,
+  applyTranslations,
+  getLanguageSetting,
+  initI18n,
+  setLanguageSetting,
+  t,
+} from "./lib/i18n.js";
 
 const input = document.getElementById("api-url");
 const keyInput = document.getElementById("api-key");
 const status = document.getElementById("status");
+const languageSelect = document.getElementById("language");
 
 document.getElementById("show-key").addEventListener("change", (event) => {
   keyInput.type = event.target.checked ? "text" : "password";
@@ -50,12 +59,6 @@ function readInput() {
   }
 }
 
-const NO_PERMISSION_NOTE = " Permission to access that host wasn't granted, so the server has to allow "
-  + "extension requests itself (PhishNet 2.4.0 and newer do).";
-
-const KEY_HINT = " Paste the API key that \"phishnet serve\" printed when it first started "
-  + "(stored in ~/.phishnet/api-key on the server), or make a new one with: phishnet serve --regenerate-key";
-
 document.getElementById("settings-form").addEventListener("submit", (event) => {
   event.preventDefault();
   const url = readInput();
@@ -69,9 +72,9 @@ document.getElementById("settings-form").addEventListener("submit", (event) => {
     await setApiKey(key);
     input.value = url;
     keyInput.value = key;
-    const keyNote = key ? " with the API key" : " without an API key";
-    showStatus("ok", `Saved. The popup will use ${url}${keyNote}.${granted ? "" : NO_PERMISSION_NOTE}`);
-  }).catch((error) => showStatus("error", `Couldn't save the settings: ${error.message}`));
+    const saved = t(key ? "optionsSavedWithKey" : "optionsSavedWithoutKey", url);
+    showStatus("ok", granted ? saved : `${saved} ${t("optionsNoPermission")}`);
+  }).catch((error) => showStatus("error", t("optionsSaveFailed", error.message)));
 });
 
 document.getElementById("test").addEventListener("click", () => {
@@ -80,29 +83,47 @@ document.getElementById("test").addEventListener("click", () => {
   if (url === null || key === null) {
     return;
   }
-  showStatus("", `Connecting to ${url}…`);
+  showStatus("", t("optionsConnecting", url));
   requestHostPermission(url)
     .then(() => checkConnection(url, key))
     .then(({ keyChecked }) => showStatus("ok", keyChecked
-      ? `Connected: PhishNet API is running at ${url}, and it accepts ${key ? "the API key" : "requests without a key"}.`
-      : `Connected: PhishNet API is running at ${url}. It's older than 2.9.0, so it doesn't check API keys.`))
-    .catch((error) => showStatus("error", error.message
-      + (error instanceof ApiError && error.kind === "auth" ? KEY_HINT : "")));
+      ? t(key ? "optionsConnectedWithKey" : "optionsConnectedWithoutKey", url)
+      : t("optionsConnectedOldServer", url)))
+    .catch((error) => showStatus("error", error instanceof ApiError && error.kind === "auth"
+      ? `${error.message} ${t("optionsKeyHint")}`
+      : error.message));
 });
 
 document.getElementById("reset").addEventListener("click", async () => {
   try {
     await resetApiBaseUrl();
     input.value = DEFAULT_API_URL;
-    showStatus("ok", `Reset to the default, ${DEFAULT_API_URL}.`);
+    showStatus("ok", t("optionsResetDone", DEFAULT_API_URL));
   } catch (error) {
-    showStatus("error", `Couldn't reset the setting: ${error.message}`);
+    showStatus("error", t("optionsResetFailed", error.message));
   }
 });
 
-Promise.all([getApiBaseUrl(), getApiKey()])
-  .then(([url, key]) => {
+// Applied as soon as it's picked; the popup reads it each time it opens.
+languageSelect.addEventListener("change", async () => {
+  try {
+    await setLanguageSetting(languageSelect.value);
+    await initI18n();
+    applyTranslations();
+    showStatus("ok", t("optionsLanguageSaved"));
+  } catch (error) {
+    showStatus("error", t("optionsSaveFailed", error.message));
+  }
+});
+
+initI18n()
+  .then(() => {
+    applyTranslations();
+    return Promise.all([getApiBaseUrl(), getApiKey(), getLanguageSetting().catch(() => AUTO_LANGUAGE)]);
+  })
+  .then(([url, key, language]) => {
     input.value = url;
     keyInput.value = key;
+    languageSelect.value = language;
   })
-  .catch((error) => showStatus("error", `Couldn't load the saved settings: ${error.message}`));
+  .catch((error) => showStatus("error", t("optionsLoadFailed", error.message)));

@@ -1,8 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "PhishNet Detector",
+  "name": "__MSG_extName__",
   "version": "2.9.0",
-  "description": "Checks the page you're on with your own PhishNet Detector API (phishnet serve) and shows its phishing risk score.",
+  "description": "__MSG_extDescription__",
+  "default_locale": "en",
   "homepage_url": "https://github.com/Deipedra34/PhishNet-Detector",
   "icons": {
     "16": "icons/icon-16.png",
@@ -11,7 +12,7 @@
     "128": "icons/icon-128.png"
   },
   "action": {
-    "default_title": "Check this page with PhishNet",
+    "default_title": "__MSG_actionTitle__",
     "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon-16.png",

@@ -2,6 +2,8 @@
 // stored API address and API key, and the calls to a PhishNet Detector REST API
 // (`phishnet serve`).
 
+import { currentLanguage, t } from "./i18n.js";
+
 /**
  * Firefox provides the promise-based `browser` namespace; Chrome and Edge
  * provide `chrome` (also promise-based under Manifest V3). Everything here
@@ -65,7 +67,7 @@ export async function setApiKey(key) {
 export function normalizeApiKey(input) {
   const key = (input ?? "").trim();
   if (key && !/^[\x21-\x7e]+$/.test(key)) {
-    throw new Error("The API key can't contain spaces or special characters - copy it exactly as printed.");
+    throw new Error(t("errInvalidKey"));
   }
   return key;
 }
@@ -80,19 +82,19 @@ export function normalizeApiKey(input) {
 export function normalizeApiBaseUrl(input) {
   const text = (input ?? "").trim();
   if (!text) {
-    throw new Error(`Enter the API address, for example ${DEFAULT_API_URL}`);
+    throw new Error(t("errEnterAddress", DEFAULT_API_URL));
   }
   let url;
   try {
     url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `http://${text}`);
   } catch {
-    throw new Error("That doesn't look like a valid address.");
+    throw new Error(t("errInvalidAddress"));
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error("The address must start with http:// or https://");
+    throw new Error(t("errProtocol"));
   }
   if (url.username || url.password || url.search || url.hash) {
-    throw new Error("Use just the server address, without a login, query string, or #fragment.");
+    throw new Error(t("errAddressExtras"));
   }
   return (url.origin + url.pathname).replace(/\/+$/, "");
 }
@@ -124,12 +126,14 @@ export class ApiError extends Error {
   /**
    * @param {"unreachable"|"timeout"|"http"|"invalid"|"auth"|"rate"} kind
    * @param {number} [retryAfterSeconds] for kind "rate": the server's Retry-After
+   * @param {number} [status] the HTTP status, when the server answered
    */
-  constructor(kind, message, retryAfterSeconds) {
+  constructor(kind, message, retryAfterSeconds, status) {
     super(message);
     this.name = "ApiError";
     this.kind = kind;
     this.retryAfterSeconds = retryAfterSeconds;
+    this.status = status;
   }
 }
 
@@ -141,18 +145,22 @@ async function requestJson(apiBaseUrl, path, init, timeoutMs, apiKey) {
     try {
       response = await fetch(apiBaseUrl + path, {
         ...init,
-        headers: { ...init.headers, ...(apiKey ? { [API_KEY_HEADER]: apiKey } : {}) },
+        // The API answers in this language (error messages, scan result text).
+        headers: {
+          ...init.headers,
+          "Accept-Language": currentLanguage(),
+          ...(apiKey ? { [API_KEY_HEADER]: apiKey } : {}),
+        },
         signal: controller.signal,
         credentials: "omit",
         cache: "no-store",
       });
     } catch {
       if (controller.signal.aborted) {
-        throw new ApiError("timeout",
-          `PhishNet API at ${apiBaseUrl} didn't answer within ${timeoutMs / 1000} seconds.`);
+        throw new ApiError("timeout", t("errTimeout", apiBaseUrl, timeoutMs / 1000));
       }
       // Network failure, refused connection, or a request blocked by CORS all end up here.
-      throw new ApiError("unreachable", `Can't reach PhishNet API at ${apiBaseUrl} — is "phishnet serve" running?`);
+      throw new ApiError("unreachable", t("errUnreachable", apiBaseUrl));
     }
 
     let body = null;
@@ -164,23 +172,19 @@ async function requestJson(apiBaseUrl, path, init, timeoutMs, apiKey) {
     if (!response.ok) {
       // A PhishNet API always explains its errors as {"error": "..."}; anything else is some other server.
       if (response.status === 401 && typeof body?.error === "string") {
-        throw new ApiError("auth", apiKey
-          ? "PhishNet API rejected the API key."
-          : "PhishNet API requires an API key.");
+        throw new ApiError("auth", t(apiKey ? "errKeyRejected" : "errKeyRequired"), undefined, 401);
       }
       if (response.status === 429 && typeof body?.error === "string") {
         const retryAfter = Number.parseInt(response.headers.get("Retry-After") ?? "", 10);
-        throw new ApiError("rate", body.error, Number.isFinite(retryAfter) ? retryAfter : undefined);
+        throw new ApiError("rate", body.error, Number.isFinite(retryAfter) ? retryAfter : undefined, 429);
       }
       if (typeof body?.error === "string") {
-        throw new ApiError("http", `PhishNet API error: ${body.error}`);
+        throw new ApiError("http", t("errApi", body.error), undefined, response.status);
       }
-      throw new ApiError("invalid",
-        `${apiBaseUrl} answered with HTTP ${response.status}, not like a PhishNet API. Check the address in Settings.`);
+      throw new ApiError("invalid", t("errHttpNotApi", apiBaseUrl, response.status), undefined, response.status);
     }
     if (body === null || typeof body !== "object") {
-      throw new ApiError("invalid",
-        `${apiBaseUrl} answered, but not like a PhishNet API. Check the address in Settings.`);
+      throw new ApiError("invalid", t("errNotApiCheckSettings", apiBaseUrl), undefined, response.status);
     }
     return body;
   } finally {
@@ -201,8 +205,7 @@ export async function scanUrl(apiBaseUrl, pageUrl, apiKey) {
     body: JSON.stringify({ url: pageUrl }),
   }, SCAN_TIMEOUT_MS, apiKey);
   if (typeof result.score !== "number" || !RISK_LEVELS.includes(result.level) || !Array.isArray(result.signals)) {
-    throw new ApiError("invalid",
-      `${apiBaseUrl} answered, but not with a PhishNet scan result. Check the address in Settings.`);
+    throw new ApiError("invalid", t("errNotScanResult", apiBaseUrl));
   }
   return result;
 }
@@ -215,7 +218,7 @@ export async function scanUrl(apiBaseUrl, pageUrl, apiKey) {
 export async function checkHealth(apiBaseUrl) {
   const body = await requestJson(apiBaseUrl, "/api/health", { method: "GET" }, HEALTH_TIMEOUT_MS);
   if (body.status !== "ok") {
-    throw new ApiError("invalid", `${apiBaseUrl} answered, but not like a PhishNet API.`);
+    throw new ApiError("invalid", t("errNotApi", apiBaseUrl));
   }
 }
 
@@ -232,7 +235,8 @@ export async function checkConnection(apiBaseUrl, apiKey) {
     await requestJson(apiBaseUrl, "/api/auth/check", { method: "GET" }, HEALTH_TIMEOUT_MS, apiKey);
     return { keyChecked: true };
   } catch (error) {
-    if (error instanceof ApiError && error.kind === "http" && /not found/i.test(error.message)) {
+    // By status, not message: the server's message is in the extension's language.
+    if (error instanceof ApiError && error.kind === "http" && error.status === 404) {
       return { keyChecked: false };
     }
     throw error;

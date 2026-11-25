@@ -13,7 +13,7 @@
       <img src="icons/icon-48.png" alt="">
       <span>Phish<span class="accent">Net</span></span>
     </div>
-    <a href="#" id="open-settings" class="settings-link">Settings</a>
+    <a href="#" id="open-settings" class="settings-link" data-i18n="popupSettings">Settings</a>
   </header>
 
   <p id="target" class="target muted"></p>
@@ -21,7 +21,7 @@
   <main aria-live="polite">
     <section id="loading" class="state" hidden>
       <div class="spinner" aria-hidden="true"></div>
-      <p>Checking…</p>
+      <p data-i18n="popupChecking">Checking…</p>
     </section>
 
     <section id="result" class="state" hidden>
@@ -32,16 +32,16 @@
       <div class="meter" aria-hidden="true"><div id="meter-fill" class="meter-fill"></div></div>
       <p id="recommendation" class="recommendation"></p>
       <p id="domain-age" class="muted small" hidden></p>
-      <h2 id="signals-heading">Why</h2>
+      <h2 id="signals-heading" data-i18n="popupWhy">Why</h2>
       <ul id="signals" class="signals"></ul>
-      <p id="no-signals" class="no-signals" hidden>✓ No phishing indicators detected</p>
+      <p id="no-signals" class="no-signals" data-i18n="popupNoSignals" hidden>✓ No phishing indicators detected</p>
       <p id="more-signals" class="muted small" hidden></p>
     </section>
 
     <section id="error" class="state notice error" hidden>
       <p id="error-message" class="error-message"></p>
       <p id="error-hint" class="muted small"></p>
-      <button id="retry" type="button">Try again</button>
+      <button id="retry" type="button" data-i18n="popupTryAgain">Try again</button>
     </section>
 
     <section id="unsupported" class="state notice" hidden>
@@ -50,7 +50,7 @@
   </main>
 
   <footer class="muted small">
-    API: <span id="api-url"></span>
+    <span data-i18n="popupApi">API:</span> <span id="api-url"></span>
   </footer>
 </body>
 </html>

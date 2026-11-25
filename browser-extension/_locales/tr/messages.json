@@ -1,0 +1,185 @@
+{
+  "extName": {
+    "message": "PhishNet Detector",
+    "description": "Extension name, shown in the browser's extension list."
+  },
+  "extDescription": {
+    "message": "Bulunduğunuz sayfayı kendi PhishNet Detector API'nizle (phishnet serve) kontrol eder ve oltalama risk puanını gösterir.",
+    "description": "Extension description, shown in the browser's extension list."
+  },
+  "actionTitle": {
+    "message": "Bu sayfayı PhishNet ile kontrol et",
+    "description": "Tooltip of the toolbar icon."
+  },
+
+  "popupSettings": { "message": "Ayarlar" },
+  "popupChecking": { "message": "Kontrol ediliyor…" },
+  "popupWhy": { "message": "Neden", "description": "Heading above the list of matched signals." },
+  "popupNoSignals": { "message": "✓ Oltalama belirtisi bulunmadı" },
+  "popupTryAgain": { "message": "Yeniden dene" },
+  "popupApi": { "message": "API:", "description": "Footer label before the API address." },
+  "popupLevel_LOW": { "message": "DÜŞÜK RİSK" },
+  "popupLevel_MEDIUM": { "message": "ORTA RİSK" },
+  "popupLevel_HIGH": { "message": "YÜKSEK RİSK" },
+  "popupMoreSignals": {
+    "message": "+$COUNT$ tane daha",
+    "placeholders": { "count": { "content": "$1", "example": "3" } }
+  },
+  "popupDomainAge": {
+    "message": "Alan adı yaşı: $AGE$",
+    "placeholders": { "age": { "content": "$1", "example": "3 ay" } }
+  },
+  "popupDomainAgeRegistered": {
+    "message": "Alan adı yaşı: $AGE$ (kayıt tarihi $DATE$)",
+    "placeholders": {
+      "age": { "content": "$1", "example": "3 ay" },
+      "date": { "content": "$2", "example": "2026-08-01" }
+    }
+  },
+  "popupDomainAgeDays": {
+    "message": "$COUNT$ gün",
+    "placeholders": { "count": { "content": "$1", "example": "45" } }
+  },
+  "popupDomainAgeUnknown": { "message": "Alan adı yaşı: bilinmiyor" },
+  "popupNoAddress": {
+    "message": "PhishNet bu sekmenin adresini okuyamadı. Kontrol etmek istediğiniz sayfadayken araç çubuğu simgesine tıklayın."
+  },
+  "popupUnsupportedPage": { "message": "Yalnızca normal web sayfaları (http:// ve https://) kontrol edilebilir." },
+  "popupSomethingWrong": {
+    "message": "Bir şeyler ters gitti: $MESSAGE$",
+    "placeholders": { "message": { "content": "$1" } }
+  },
+  "hintUnreachable": {
+    "message": "Sunucuyu \"phishnet serve\" komutuyla (veya Docker imajıyla) başlatın ya da Ayarlar'dan doğru adresi girin. Başka bir makinedeki sunucu için PhishNet 2.4.0 veya daha yenisi gerekir."
+  },
+  "hintTimeout": {
+    "message": "Bu adreste bir şey dinliyor ama yanıt vermedi. Bunun bir PhishNet API'si olduğunu kontrol edin veya yeniden deneyin."
+  },
+  "hintAuth": {
+    "message": "Ayarlar'ı açın ve \"phishnet serve\" komutunun ilk başlatıldığında yazdırdığı API anahtarını yapıştırın (sunucuda ~/.phishnet/api-key dosyasında saklanır)."
+  },
+  "hintRate": {
+    "message": "Sunucu dakikada yapılabilecek tarama sayısını sınırlıyor. Biraz bekleyip yeniden deneyin."
+  },
+
+  "errInvalidKey": {
+    "message": "API anahtarı boşluk veya özel karakter içeremez; yazdırıldığı gibi aynen kopyalayın."
+  },
+  "errEnterAddress": {
+    "message": "API adresini girin, örneğin $URL$",
+    "placeholders": { "url": { "content": "$1", "example": "http://localhost:8080" } }
+  },
+  "errInvalidAddress": { "message": "Bu geçerli bir adres gibi görünmüyor." },
+  "errProtocol": { "message": "Adres http:// veya https:// ile başlamalıdır" },
+  "errAddressExtras": { "message": "Oturum bilgisi, sorgu dizesi veya #parça olmadan yalnızca sunucu adresini kullanın." },
+  "errTimeout": {
+    "message": "$URL$ adresindeki PhishNet API'si $SECONDS$ saniye içinde yanıt vermedi.",
+    "placeholders": {
+      "url": { "content": "$1", "example": "http://localhost:8080" },
+      "seconds": { "content": "$2", "example": "20" }
+    }
+  },
+  "errUnreachable": {
+    "message": "$URL$ adresindeki PhishNet API'sine ulaşılamıyor — \"phishnet serve\" çalışıyor mu?",
+    "placeholders": { "url": { "content": "$1", "example": "http://localhost:8080" } }
+  },
+  "errKeyRejected": { "message": "PhishNet API'si API anahtarını reddetti." },
+  "errKeyRequired": { "message": "PhishNet API'si bir API anahtarı istiyor." },
+  "errApi": {
+    "message": "PhishNet API hatası: $MESSAGE$",
+    "placeholders": { "message": { "content": "$1", "example": "Gerekli 'url' alanı eksik" } }
+  },
+  "errHttpNotApi": {
+    "message": "$URL$, HTTP $STATUS$ ile yanıt verdi; bir PhishNet API'si gibi değil. Ayarlar'daki adresi kontrol edin.",
+    "placeholders": {
+      "url": { "content": "$1", "example": "http://localhost:8080" },
+      "status": { "content": "$2", "example": "404" }
+    }
+  },
+  "errNotApiCheckSettings": {
+    "message": "$URL$ yanıt verdi ama bir PhishNet API'si gibi değil. Ayarlar'daki adresi kontrol edin.",
+    "placeholders": { "url": { "content": "$1", "example": "http://localhost:8080" } }
+  },
+  "errNotScanResult": {
+    "message": "$URL$ yanıt verdi ama bir PhishNet tarama sonucuyla değil. Ayarlar'daki adresi kontrol edin.",
+    "placeholders": { "url": { "content": "$1", "example": "http://localhost:8080" } }
+  },
+  "errNotApi": {
+    "message": "$URL$ yanıt verdi ama bir PhishNet API'si gibi değil.",
+    "placeholders": { "url": { "content": "$1", "example": "http://localhost:8080" } }
+  },
+
+  "optionsTitle": { "message": "PhishNet Detector – Ayarlar", "description": "Title of the settings page." },
+  "optionsBrandSuffix": { "message": "Detector – Ayarlar", "description": "Shown after the PhishNet logo." },
+  "optionsApiAddress": { "message": "PhishNet API adresi" },
+  "optionsApiAddressHelp": {
+    "message": "`phishnet serve` örneğinizin dinlediği adres. Varsayılan `http://localhost:8080` adresi, `phishnet serve` ile ve `-p 8080:8080` ile çalıştırılan Docker imajıyla eşleşir. Başka bir port veya makine için ör. `http://localhost:9090` ya da `http://192.168.1.20:8080` girin.",
+    "description": "Text between backticks is shown as code."
+  },
+  "optionsApiKey": { "message": "API anahtarı" },
+  "optionsApiKeyPlaceholder": { "message": "phishnet serve komutunun yazdırdığı anahtarı yapıştırın" },
+  "optionsShow": { "message": "Göster", "description": "Checkbox that shows the API key in plain text." },
+  "optionsApiKeyHelp": {
+    "message": "2.9.0 sürümünden beri `phishnet serve` bir API anahtarı ister. Anahtarı ilk başlatıldığında yazdırır ve sunucuda `~/.phishnet/api-key` dosyasında saklar; yeni bir anahtar `phishnet serve --regenerate-key` ile oluşturulabilir. `--no-auth` ile başlatılmış bir sunucu için boş bırakın. Anahtar bu tarayıcının eklenti depolamasında saklanır.",
+    "description": "Text between backticks is shown as code."
+  },
+  "optionsSave": { "message": "Kaydet" },
+  "optionsTest": { "message": "Bağlantıyı sına" },
+  "optionsReset": { "message": "Varsayılana dön" },
+  "optionsLanguage": { "message": "Dil" },
+  "optionsLanguageAuto": { "message": "Otomatik (tarayıcı dili)" },
+  "optionsLanguageHelp": {
+    "message": "Açılır pencerenin ve bu sayfanın dili. API'den de aynı dilde yanıt vermesi istenir. Hemen geçerli olur."
+  },
+  "optionsLanguageSaved": { "message": "Dil kaydedildi." },
+  "optionsPrivacy": { "message": "Gizlilik" },
+  "optionsPrivacyText": {
+    "message": "Sayfalar yalnızca PhishNet araç çubuğu simgesine tıkladığınızda kontrol edilir. Eklenti o tek sayfanın adresini yukarıdaki API adresine - kendi sunucunuza - gönderir, başka hiçbir yere göndermez. Arka planda hiçbir şey çalışmaz."
+  },
+  "optionsSavedWithKey": {
+    "message": "Kaydedildi. Açılır pencere $URL$ adresini API anahtarıyla kullanacak.",
+    "placeholders": { "url": { "content": "$1", "example": "http://localhost:8080" } }
+  },
+  "optionsSavedWithoutKey": {
+    "message": "Kaydedildi. Açılır pencere $URL$ adresini API anahtarı olmadan kullanacak.",
+    "placeholders": { "url": { "content": "$1", "example": "http://localhost:8080" } }
+  },
+  "optionsNoPermission": {
+    "message": "O sunucuya erişim izni verilmedi, bu yüzden eklenti isteklerine sunucunun kendisinin izin vermesi gerekiyor (PhishNet 2.4.0 ve sonrası izin verir)."
+  },
+  "optionsKeyHint": {
+    "message": "\"phishnet serve\" komutunun ilk başlatıldığında yazdırdığı API anahtarını yapıştırın (sunucuda ~/.phishnet/api-key dosyasında saklanır) veya şu komutla yeni bir anahtar oluşturun: phishnet serve --regenerate-key"
+  },
+  "optionsSaveFailed": {
+    "message": "Ayarlar kaydedilemedi: $MESSAGE$",
+    "placeholders": { "message": { "content": "$1" } }
+  },
+  "optionsConnecting": {
+    "message": "$URL$ adresine bağlanılıyor…",
+    "placeholders": { "url": { "content": "$1", "example": "http://localhost:8080" } }
+  },
+  "optionsConnectedWithKey": {
+    "message": "Bağlandı: PhishNet API'si $URL$ adresinde çalışıyor ve API anahtarını kabul ediyor.",
+    "placeholders": { "url": { "content": "$1", "example": "http://localhost:8080" } }
+  },
+  "optionsConnectedWithoutKey": {
+    "message": "Bağlandı: PhishNet API'si $URL$ adresinde çalışıyor ve anahtarsız istekleri kabul ediyor.",
+    "placeholders": { "url": { "content": "$1", "example": "http://localhost:8080" } }
+  },
+  "optionsConnectedOldServer": {
+    "message": "Bağlandı: PhishNet API'si $URL$ adresinde çalışıyor. 2.9.0'dan eski olduğu için API anahtarlarını kontrol etmiyor.",
+    "placeholders": { "url": { "content": "$1", "example": "http://localhost:8080" } }
+  },
+  "optionsResetDone": {
+    "message": "Varsayılana döndürüldü: $URL$.",
+    "placeholders": { "url": { "content": "$1", "example": "http://localhost:8080" } }
+  },
+  "optionsResetFailed": {
+    "message": "Ayar sıfırlanamadı: $MESSAGE$",
+    "placeholders": { "message": { "content": "$1" } }
+  },
+  "optionsLoadFailed": {
+    "message": "Kayıtlı ayarlar yüklenemedi: $MESSAGE$",
+    "placeholders": { "message": { "content": "$1" } }
+  }
+}

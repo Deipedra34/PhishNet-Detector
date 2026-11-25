@@ -2,6 +2,7 @@
 // Nothing runs in the background and no page is scanned unless you click the icon.
 
 import { ApiError, ext, getApiBaseUrl, getApiKey, isScannablePageUrl, scanUrl } from "./lib/api.js";
+import { applyTranslations, initI18n, t } from "./lib/i18n.js";
 
 /** How many signals to list before collapsing the rest into "+N more". */
 const MAX_SIGNALS = 5;
@@ -22,17 +23,14 @@ function showUnsupported(message) {
 
 function showError(error) {
   const isApiError = error instanceof ApiError;
-  $("error-message").textContent = isApiError ? error.message : `Something went wrong: ${error?.message ?? error}`;
+  $("error-message").textContent = isApiError ? error.message : t("popupSomethingWrong", error?.message ?? error);
   const hints = {
-    unreachable: "Start it with \"phishnet serve\" (or the Docker image), or set the right address in Settings. "
-      + "A server on another machine needs PhishNet 2.4.0 or newer.",
-    timeout: "Something is listening at that address but didn't reply. Check that it's a PhishNet API, "
-      + "or try again.",
-    auth: "Open Settings and paste the API key that \"phishnet serve\" printed when it first started "
-      + "(it's stored in ~/.phishnet/api-key on the server).",
-    rate: "The server limits how many scans can be made per minute. Wait a moment, then try again.",
+    unreachable: "hintUnreachable",
+    timeout: "hintTimeout",
+    auth: "hintAuth",
+    rate: "hintRate",
   };
-  const hint = (isApiError && hints[error.kind]) || "";
+  const hint = isApiError && hints[error.kind] ? t(hints[error.kind]) : "";
   $("error-hint").textContent = hint;
   $("error-hint").hidden = !hint;
   show("error");
@@ -43,16 +41,16 @@ function describeDomainAge(domainAge) {
     return "";
   }
   if (domainAge.status === "KNOWN") {
-    const age = domainAge.age ?? `${domainAge.ageDays} days`;
-    return domainAge.creationDate ? `Domain age: ${age} (registered ${domainAge.creationDate})` : `Domain age: ${age}`;
+    const age = domainAge.age ?? t("popupDomainAgeDays", domainAge.ageDays);
+    return domainAge.creationDate ? t("popupDomainAgeRegistered", age, domainAge.creationDate) : t("popupDomainAge", age);
   }
-  return "Domain age: unknown";
+  return t("popupDomainAgeUnknown");
 }
 
 function showResult(result) {
   const level = result.level.toLowerCase();
   $("result").className = `state level-${level}`;
-  $("level").textContent = `${result.level} RISK`;
+  $("level").textContent = t(`popupLevel_${result.level}`);
   $("score").textContent = String(result.score);
   $("meter-fill").style.width = `${Math.max(0, Math.min(100, result.score))}%`;
   $("recommendation").textContent = result.recommendation ?? "";
@@ -77,7 +75,7 @@ function showResult(result) {
   list.hidden = !hasSignals;
   $("no-signals").hidden = hasSignals;
   const more = result.signals.length - MAX_SIGNALS;
-  $("more-signals").textContent = more > 0 ? `+${more} more` : "";
+  $("more-signals").textContent = more > 0 ? t("popupMoreSignals", more) : "";
   $("more-signals").hidden = more <= 0;
 
   show("result");
@@ -93,6 +91,8 @@ async function runScan(apiBaseUrl, apiKey, pageUrl) {
 }
 
 async function main() {
+  await initI18n();
+  applyTranslations();
   $("open-settings").addEventListener("click", (event) => {
     event.preventDefault();
     ext.runtime.openOptionsPage();
@@ -108,13 +108,13 @@ async function main() {
   const [tab] = await ext.tabs.query({ active: true, currentWindow: true });
   const pageUrl = tab?.url;
   if (!pageUrl) {
-    showUnsupported("PhishNet couldn't read this tab's address. Click the toolbar icon while on the page you want to check.");
+    showUnsupported(t("popupNoAddress"));
     return;
   }
   $("target").textContent = pageUrl;
   $("target").title = pageUrl;
   if (!isScannablePageUrl(pageUrl)) {
-    showUnsupported("Only regular web pages (http:// and https://) can be checked.");
+    showUnsupported(t("popupUnsupportedPage"));
     return;
   }
 

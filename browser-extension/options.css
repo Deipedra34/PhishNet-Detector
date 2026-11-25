@@ -14,7 +14,8 @@ label {
   margin-bottom: 6px;
 }
 
-input {
+input,
+select {
   width: 100%;
   font: inherit;
   color: var(--text);
@@ -26,6 +27,15 @@ input {
 
 .second-label {
   margin-top: 18px;
+}
+
+.language {
+  margin: 0 0 24px;
+}
+
+.language select {
+  width: auto;
+  min-width: 240px;
 }
 
 .key-row {

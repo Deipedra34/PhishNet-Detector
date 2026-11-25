@@ -1,0 +1,185 @@
+{
+  "extName": {
+    "message": "PhishNet Detector",
+    "description": "Extension name, shown in the browser's extension list."
+  },
+  "extDescription": {
+    "message": "Checks the page you're on with your own PhishNet Detector API (phishnet serve) and shows its phishing risk score.",
+    "description": "Extension description, shown in the browser's extension list."
+  },
+  "actionTitle": {
+    "message": "Check this page with PhishNet",
+    "description": "Tooltip of the toolbar icon."
+  },
+
+  "popupSettings": { "message": "Settings" },
+  "popupChecking": { "message": "Checking…" },
+  "popupWhy": { "message": "Why", "description": "Heading above the list of matched signals." },
+  "popupNoSignals": { "message": "✓ No phishing indicators detected" },
+  "popupTryAgain": { "message": "Try again" },
+  "popupApi": { "message": "API:", "description": "Footer label before the API address." },
+  "popupLevel_LOW": { "message": "LOW RISK" },
+  "popupLevel_MEDIUM": { "message": "MEDIUM RISK" },
+  "popupLevel_HIGH": { "message": "HIGH RISK" },
+  "popupMoreSignals": {
+    "message": "+$COUNT$ more",
+    "placeholders": { "count": { "content": "$1", "example": "3" } }
+  },
+  "popupDomainAge": {
+    "message": "Domain age: $AGE$",
+    "placeholders": { "age": { "content": "$1", "example": "3 months" } }
+  },
+  "popupDomainAgeRegistered": {
+    "message": "Domain age: $AGE$ (registered $DATE$)",
+    "placeholders": {
+      "age": { "content": "$1", "example": "3 months" },
+      "date": { "content": "$2", "example": "2026-08-01" }
+    }
+  },
+  "popupDomainAgeDays": {
+    "message": "$COUNT$ days",
+    "placeholders": { "count": { "content": "$1", "example": "45" } }
+  },
+  "popupDomainAgeUnknown": { "message": "Domain age: unknown" },
+  "popupNoAddress": {
+    "message": "PhishNet couldn't read this tab's address. Click the toolbar icon while on the page you want to check."
+  },
+  "popupUnsupportedPage": { "message": "Only regular web pages (http:// and https://) can be checked." },
+  "popupSomethingWrong": {
+    "message": "Something went wrong: $MESSAGE$",
+    "placeholders": { "message": { "content": "$1" } }
+  },
+  "hintUnreachable": {
+    "message": "Start it with \"phishnet serve\" (or the Docker image), or set the right address in Settings. A server on another machine needs PhishNet 2.4.0 or newer."
+  },
+  "hintTimeout": {
+    "message": "Something is listening at that address but didn't reply. Check that it's a PhishNet API, or try again."
+  },
+  "hintAuth": {
+    "message": "Open Settings and paste the API key that \"phishnet serve\" printed when it first started (it's stored in ~/.phishnet/api-key on the server)."
+  },
+  "hintRate": {
+    "message": "The server limits how many scans can be made per minute. Wait a moment, then try again."
+  },
+
+  "errInvalidKey": {
+    "message": "The API key can't contain spaces or special characters - copy it exactly as printed."
+  },
+  "errEnterAddress": {
+    "message": "Enter the API address, for example $URL$",
+    "placeholders": { "url": { "content": "$1", "example": "http://localhost:8080" } }
+  },
+  "errInvalidAddress": { "message": "That doesn't look like a valid address." },
+  "errProtocol": { "message": "The address must start with http:// or https://" },
+  "errAddressExtras": { "message": "Use just the server address, without a login, query string, or #fragment." },
+  "errTimeout": {
+    "message": "PhishNet API at $URL$ didn't answer within $SECONDS$ seconds.",
+    "placeholders": {
+      "url": { "content": "$1", "example": "http://localhost:8080" },
+      "seconds": { "content": "$2", "example": "20" }
+    }
+  },
+  "errUnreachable": {
+    "message": "Can't reach PhishNet API at $URL$ — is \"phishnet serve\" running?",
+    "placeholders": { "url": { "content": "$1", "example": "http://localhost:8080" } }
+  },
+  "errKeyRejected": { "message": "PhishNet API rejected the API key." },
+  "errKeyRequired": { "message": "PhishNet API requires an API key." },
+  "errApi": {
+    "message": "PhishNet API error: $MESSAGE$",
+    "placeholders": { "message": { "content": "$1", "example": "Missing required field 'url'" } }
+  },
+  "errHttpNotApi": {
+    "message": "$URL$ answered with HTTP $STATUS$, not like a PhishNet API. Check the address in Settings.",
+    "placeholders": {
+      "url": { "content": "$1", "example": "http://localhost:8080" },
+      "status": { "content": "$2", "example": "404" }
+    }
+  },
+  "errNotApiCheckSettings": {
+    "message": "$URL$ answered, but not like a PhishNet API. Check the address in Settings.",
+    "placeholders": { "url": { "content": "$1", "example": "http://localhost:8080" } }
+  },
+  "errNotScanResult": {
+    "message": "$URL$ answered, but not with a PhishNet scan result. Check the address in Settings.",
+    "placeholders": { "url": { "content": "$1", "example": "http://localhost:8080" } }
+  },
+  "errNotApi": {
+    "message": "$URL$ answered, but not like a PhishNet API.",
+    "placeholders": { "url": { "content": "$1", "example": "http://localhost:8080" } }
+  },
+
+  "optionsTitle": { "message": "PhishNet Detector – Settings", "description": "Title of the settings page." },
+  "optionsBrandSuffix": { "message": "Detector – Settings", "description": "Shown after the PhishNet logo." },
+  "optionsApiAddress": { "message": "PhishNet API address" },
+  "optionsApiAddressHelp": {
+    "message": "Where your `phishnet serve` instance is listening. The default, `http://localhost:8080`, matches `phishnet serve` and the Docker image run with `-p 8080:8080`. For another port or machine, enter e.g. `http://localhost:9090` or `http://192.168.1.20:8080`.",
+    "description": "Text between backticks is shown as code."
+  },
+  "optionsApiKey": { "message": "API key" },
+  "optionsApiKeyPlaceholder": { "message": "paste the key printed by phishnet serve" },
+  "optionsShow": { "message": "Show", "description": "Checkbox that shows the API key in plain text." },
+  "optionsApiKeyHelp": {
+    "message": "Since version 2.9.0, `phishnet serve` requires an API key. It prints the key when it first starts and stores it in `~/.phishnet/api-key` on the server; a new one can be made with `phishnet serve --regenerate-key`. Leave this empty for a server started with `--no-auth`. The key is kept in this browser's extension storage.",
+    "description": "Text between backticks is shown as code."
+  },
+  "optionsSave": { "message": "Save" },
+  "optionsTest": { "message": "Test connection" },
+  "optionsReset": { "message": "Reset to default" },
+  "optionsLanguage": { "message": "Language" },
+  "optionsLanguageAuto": { "message": "Automatic (browser language)" },
+  "optionsLanguageHelp": {
+    "message": "Language of the popup and this page. The API is asked to answer in the same language. Takes effect right away."
+  },
+  "optionsLanguageSaved": { "message": "Language saved." },
+  "optionsPrivacy": { "message": "Privacy" },
+  "optionsPrivacyText": {
+    "message": "Pages are only checked when you click the PhishNet toolbar icon. The extension then sends that one page's address to the API address above - your own server - and nowhere else. Nothing runs in the background."
+  },
+  "optionsSavedWithKey": {
+    "message": "Saved. The popup will use $URL$ with the API key.",
+    "placeholders": { "url": { "content": "$1", "example": "http://localhost:8080" } }
+  },
+  "optionsSavedWithoutKey": {
+    "message": "Saved. The popup will use $URL$ without an API key.",
+    "placeholders": { "url": { "content": "$1", "example": "http://localhost:8080" } }
+  },
+  "optionsNoPermission": {
+    "message": "Permission to access that host wasn't granted, so the server has to allow extension requests itself (PhishNet 2.4.0 and newer do)."
+  },
+  "optionsKeyHint": {
+    "message": "Paste the API key that \"phishnet serve\" printed when it first started (stored in ~/.phishnet/api-key on the server), or make a new one with: phishnet serve --regenerate-key"
+  },
+  "optionsSaveFailed": {
+    "message": "Couldn't save the settings: $MESSAGE$",
+    "placeholders": { "message": { "content": "$1" } }
+  },
+  "optionsConnecting": {
+    "message": "Connecting to $URL$…",
+    "placeholders": { "url": { "content": "$1", "example": "http://localhost:8080" } }
+  },
+  "optionsConnectedWithKey": {
+    "message": "Connected: PhishNet API is running at $URL$, and it accepts the API key.",
+    "placeholders": { "url": { "content": "$1", "example": "http://localhost:8080" } }
+  },
+  "optionsConnectedWithoutKey": {
+    "message": "Connected: PhishNet API is running at $URL$, and it accepts requests without a key.",
+    "placeholders": { "url": { "content": "$1", "example": "http://localhost:8080" } }
+  },
+  "optionsConnectedOldServer": {
+    "message": "Connected: PhishNet API is running at $URL$. It's older than 2.9.0, so it doesn't check API keys.",
+    "placeholders": { "url": { "content": "$1", "example": "http://localhost:8080" } }
+  },
+  "optionsResetDone": {
+    "message": "Reset to the default, $URL$.",
+    "placeholders": { "url": { "content": "$1", "example": "http://localhost:8080" } }
+  },
+  "optionsResetFailed": {
+    "message": "Couldn't reset the setting: $MESSAGE$",
+    "placeholders": { "message": { "content": "$1" } }
+  },
+  "optionsLoadFailed": {
+    "message": "Couldn't load the saved settings: $MESSAGE$",
+    "placeholders": { "message": { "content": "$1" } }
+  }
+}
