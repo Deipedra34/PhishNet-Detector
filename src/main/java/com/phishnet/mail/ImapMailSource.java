@@ -1,5 +1,7 @@
 package com.phishnet.mail;
 
+import com.phishnet.i18n.Messages;
+
 import jakarta.mail.FetchProfile;
 import jakarta.mail.Flags;
 import jakarta.mail.Folder;
@@ -101,8 +103,7 @@ public final class ImapMailSource implements MailSource {
                 lastUid = highestUid(newFolder);
             } else if (validity != uidValidity) {
                 lastUid = highestUid(newFolder);
-                notice = "The server reset message numbering for " + settings.folder()
-                        + " (UIDVALIDITY changed); only mail arriving from now on will be scanned.";
+                notice = Messages.text("monitor.notice.uidValidity", settings.folder());
             }
             uidValidity = validity;
             store = newStore;

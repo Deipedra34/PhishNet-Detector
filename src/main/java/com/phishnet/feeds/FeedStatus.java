@@ -1,5 +1,7 @@
 package com.phishnet.feeds;
 
+import com.phishnet.i18n.Messages;
+
 import java.time.Instant;
 
 /**
@@ -39,27 +41,36 @@ public record FeedStatus(FeedSource source, State state, Instant refreshedAt, in
      * or "not configured: no API key configured (...)". Without the feed's name.
      */
     public String describe() {
+        return describe(Messages.english());
+    }
+
+    /** {@link #describe()} in {@code messages}' language (the detail and error text stay as they are). */
+    public String describe(Messages messages) {
         StringBuilder text = new StringBuilder();
         switch (state) {
-            case FRESH, STALE -> text.append(state == State.FRESH ? "fresh" : "stale")
-                    .append(", ").append(entryCount(entries)).append(", refreshed ")
-                    .append(refreshedAt);
-            case MISSING -> text.append("unavailable (no cached copy yet)");
-            case DISABLED -> text.append("disabled");
-            case NOT_CONFIGURED -> text.append("not configured");
-            case OFF -> text.append("off");
+            case FRESH, STALE -> text.append(messages.get(state == State.FRESH ? "feeds.describe.fresh"
+                    : "feeds.describe.stale", entryCount(messages, entries), refreshedAt));
+            case MISSING -> text.append(messages.get("feeds.describe.missing"));
+            case DISABLED -> text.append(messages.get("feeds.describe.disabled"));
+            case NOT_CONFIGURED -> text.append(messages.get("feeds.describe.notConfigured"));
+            case OFF -> text.append(messages.get("feeds.describe.off"));
         }
         if (detail != null && !detail.isEmpty()) {
             text.append(state == State.FRESH || state == State.STALE || state == State.MISSING ? "; " : ": ")
                     .append(detail);
         } else if (lastError != null && state != State.FRESH) {
-            text.append("; last download failed: ").append(lastError);
+            text.append("; ").append(messages.get("feeds.describe.lastDownloadFailed", lastError));
         }
         return text.toString();
     }
 
     /** "1 entry", "41,230 entries". */
     public static String entryCount(int entries) {
-        return String.format("%,d %s", entries, entries == 1 ? "entry" : "entries");
+        return entryCount(Messages.english(), entries);
+    }
+
+    /** {@link #entryCount(int)} in {@code messages}' language. */
+    public static String entryCount(Messages messages, int entries) {
+        return messages.plural("feeds.entries", entries, String.format("%,d", entries));
     }
 }

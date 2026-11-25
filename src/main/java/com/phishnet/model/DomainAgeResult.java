@@ -1,5 +1,9 @@
 package com.phishnet.model;
 
+import com.phishnet.i18n.Localized;
+import com.phishnet.i18n.Messages;
+import com.phishnet.i18n.Text;
+
 import java.time.LocalDate;
 
 /**
@@ -25,7 +29,7 @@ public final class DomainAgeResult {
         SKIPPED
     }
 
-    private static final DomainAgeResult SKIPPED = new DomainAgeResult(Status.SKIPPED, "", null, -1, "", "");
+    private static final DomainAgeResult SKIPPED = new DomainAgeResult(Status.SKIPPED, "", null, -1, "", "", null);
 
     private final Status status;
     private final String domain;
@@ -33,23 +37,30 @@ public final class DomainAgeResult {
     private final long ageDays;
     private final String whoisServer;
     private final String reason;
+    private final Text reasonText;
 
     private DomainAgeResult(Status status, String domain, LocalDate creationDate, long ageDays,
-                            String whoisServer, String reason) {
+                            String whoisServer, String reason, Text reasonText) {
         this.status = status;
         this.domain = domain == null ? "" : domain;
         this.creationDate = creationDate;
         this.ageDays = ageDays;
         this.whoisServer = whoisServer == null ? "" : whoisServer;
         this.reason = reason == null ? "" : reason;
+        this.reasonText = reasonText;
     }
 
     public static DomainAgeResult known(String domain, LocalDate creationDate, long ageDays, String whoisServer) {
-        return new DomainAgeResult(Status.KNOWN, domain, creationDate, Math.max(0, ageDays), whoisServer, "");
+        return new DomainAgeResult(Status.KNOWN, domain, creationDate, Math.max(0, ageDays), whoisServer, "", null);
     }
 
     public static DomainAgeResult unknown(String domain, String reason) {
-        return new DomainAgeResult(Status.UNKNOWN, domain, null, -1, "", reason);
+        return new DomainAgeResult(Status.UNKNOWN, domain, null, -1, "", reason, null);
+    }
+
+    /** Same, with a reason that can be shown in any supported language ({@link #reason()} is the English). */
+    public static DomainAgeResult unknown(String domain, Text reason) {
+        return new DomainAgeResult(Status.UNKNOWN, domain, null, -1, "", reason.english(), reason);
     }
 
     public static DomainAgeResult skipped() {
@@ -93,30 +104,41 @@ public final class DomainAgeResult {
         return reason;
     }
 
+    /** {@link #reason()} in {@code messages}' language. */
+    public String reason(Messages messages) {
+        return reasonText == null ? reason : reasonText.in(messages);
+    }
+
     /**
      * Human-readable age: "N days" under 60 days (so the 30-day scoring boundary
      * stays exact), "N months" under two years, "N years" beyond that.
      * "unknown" for UNKNOWN, empty for SKIPPED.
      */
     public String formatAge() {
+        return formatAge(Messages.english());
+    }
+
+    /** {@link #formatAge()} in {@code messages}' language. */
+    public String formatAge(Messages messages) {
         if (status == Status.UNKNOWN) {
-            return "unknown";
+            return messages.get("domainAge.unknown");
         }
         if (status == Status.SKIPPED) {
             return "";
         }
         if (ageDays < 60) {
-            return plural(ageDays, "day");
+            return messages.plural("domainAge.days", ageDays);
         }
         long years = (long) (ageDays / 365.25);
         if (years < 2) {
-            return plural((long) (ageDays / 30.44), "month");
+            return messages.plural("domainAge.months", (long) (ageDays / 30.44));
         }
-        return plural(years, "year");
+        return messages.plural("domainAge.years", years);
     }
 
-    private static String plural(long n, String unit) {
-        return n + " " + unit + (n == 1 ? "" : "s");
+    /** The formatted age as a message argument, rendered in the language of the message around it. */
+    public Localized age() {
+        return this::formatAge;
     }
 
     @Override

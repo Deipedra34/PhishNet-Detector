@@ -1,5 +1,6 @@
 package com.phishnet.analyzer;
 
+import com.phishnet.i18n.Text;
 import com.phishnet.model.DomainAgeResult;
 import com.phishnet.model.UrlComponents;
 
@@ -159,11 +160,11 @@ public final class DomainAgeChecker {
         try {
             domain = normalize(domainName);
         } catch (IllegalArgumentException e) {
-            return DomainAgeResult.unknown(domainName, "not a valid domain name for WHOIS");
+            return DomainAgeResult.unknown(domainName, Text.of("domainAge.reason.invalidDomain"));
         }
         if (!VALID_DOMAIN.matcher(domain).matches()) {
             // Also keeps CR/LF or other junk from ever reaching a WHOIS server as part of the query.
-            return DomainAgeResult.unknown(domainName, "not a valid domain name for WHOIS");
+            return DomainAgeResult.unknown(domainName, Text.of("domainAge.reason.invalidDomain"));
         }
         CompletableFuture<DomainAgeResult> mine = new CompletableFuture<>();
         CompletableFuture<DomainAgeResult> existing = resultCache.putIfAbsent(domain, mine);
@@ -187,7 +188,7 @@ public final class DomainAgeChecker {
         try {
             Optional<String> registry = registryServerFor(tld, deadline);
             if (registry.isEmpty()) {
-                return DomainAgeResult.unknown(domain, "no WHOIS server known for ." + tld);
+                return DomainAgeResult.unknown(domain, Text.of("domainAge.reason.noServer", tld));
             }
             LocalDate today = LocalDate.now(clock);
             String server = registry.get();
@@ -207,20 +208,20 @@ public final class DomainAgeChecker {
 
             if (created.isEmpty()) {
                 return DomainAgeResult.unknown(domain, NOT_FOUND.matcher(response).find()
-                        ? "domain not found in WHOIS"
-                        : "no creation date in WHOIS response");
+                        ? Text.of("domainAge.reason.notFound")
+                        : Text.of("domainAge.reason.noCreationDate"));
             }
             long ageDays = ChronoUnit.DAYS.between(created.get(), today);
             return DomainAgeResult.known(domain, created.get(), ageDays, server);
         } catch (SocketTimeoutException e) {
-            return DomainAgeResult.unknown(domain, "WHOIS lookup timed out");
+            return DomainAgeResult.unknown(domain, Text.of("domainAge.reason.timeout"));
         } catch (UnknownHostException e) {
-            return DomainAgeResult.unknown(domain, "WHOIS server unreachable: " + e.getMessage());
+            return DomainAgeResult.unknown(domain, Text.of("domainAge.reason.unreachable", e.getMessage()));
         } catch (IOException e) {
-            return DomainAgeResult.unknown(domain, "WHOIS lookup failed: " + e.getMessage());
+            return DomainAgeResult.unknown(domain, Text.of("domainAge.reason.failed", e.getMessage()));
         } catch (RuntimeException e) {
             // A buggy client or a bizarre reply must never take the whole scan down.
-            return DomainAgeResult.unknown(domain, "WHOIS lookup failed: " + e);
+            return DomainAgeResult.unknown(domain, Text.of("domainAge.reason.failed", e));
         }
     }
 

@@ -178,7 +178,7 @@ public final class HtmlReportWriter {
         if (!domainAge.isKnown()) {
             return "<span class=\"none\">" + escapeHtml(msg.get("html.unknown")) + "</span>";
         }
-        return escapeHtml(domainAge.formatAge());
+        return escapeHtml(domainAge.formatAge(msg));
     }
 
     private String renderSignals(List<Signal> signals) {
@@ -188,7 +188,7 @@ public final class HtmlReportWriter {
         StringBuilder sb = new StringBuilder("<ul class=\"signals\">");
         for (Signal signal : signals) {
             sb.append("<li><strong>").append(escapeHtml(signal.id())).append("</strong>: ")
-                    .append(escapeHtml(signal.description())).append("</li>");
+                    .append(escapeHtml(signal.description(msg))).append("</li>");
         }
         sb.append("</ul>");
         return sb.toString();

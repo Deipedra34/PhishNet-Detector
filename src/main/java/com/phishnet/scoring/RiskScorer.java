@@ -1,5 +1,7 @@
 package com.phishnet.scoring;
 
+import com.phishnet.i18n.Messages;
+import com.phishnet.i18n.Text;
 import com.phishnet.model.DomainAgeResult;
 import com.phishnet.model.PhishNetConfig;
 import com.phishnet.model.RiskLevel;
@@ -81,12 +83,12 @@ public final class RiskScorer {
         List<Signal> combined = new ArrayList<>(signals);
         if (age < scoring.domainAgeNewDays()) {
             combined.add(new Signal(DOMAIN_AGE_NEW, SignalCategory.DOMAIN,
-                    "Domain was registered very recently (" + domainAge.formatAge() + " ago)", evidence));
+                    Text.of("signal.domainAgeNew", domainAge.age()), evidence));
             return score(combined, 0);
         }
         if (age <= scoring.domainAgeRecentDays()) {
             combined.add(new Signal(DOMAIN_AGE_RECENT, SignalCategory.DOMAIN,
-                    "Domain is relatively new (registered " + domainAge.formatAge() + " ago)", evidence));
+                    Text.of("signal.domainAgeRecent", domainAge.age()), evidence));
             return score(combined, 0);
         }
         // Fallback 0, not the usual 10: a config written before this signal existed
@@ -116,17 +118,7 @@ public final class RiskScorer {
     }
 
     private static String recommendationFor(RiskLevel level) {
-        switch (level) {
-            case HIGH:
-                return "High risk of phishing. Do not click any links, enter credentials, or open attachments. "
-                        + "Report and delete.";
-            case MEDIUM:
-                return "Some phishing indicators found. Proceed with caution: verify the sender/domain through "
-                        + "a separate trusted channel before interacting.";
-            case LOW:
-            default:
-                return "No strong phishing indicators found. Still verify anything requesting credentials "
-                        + "or payment before acting on it.";
-        }
+        // Stored in English; RiskScore.recommendation(Messages) shows it in other languages.
+        return Messages.english().get("recommendation." + level.name());
     }
 }

@@ -126,7 +126,7 @@ final class MonitorReporter implements MailMonitorService.Listener {
             for (Signal signal : result.score().signals()) {
                 StringBuilder line = new StringBuilder("  ")
                         .append(AnsiColor.apply(symbolFor(risk), color, colorFor(risk)))
-                        .append(" [").append(signal.id()).append("] ").append(signal.description());
+                        .append(" [").append(signal.id()).append("] ").append(signal.description(msg));
                 if (level == OutputLevel.VERBOSE && !signal.evidence().isEmpty()) {
                     line.append(" (").append(clean(signal.evidence(), "")).append(")");
                 }
@@ -134,7 +134,7 @@ final class MonitorReporter implements MailMonitorService.Listener {
             }
         }
         if (flagged) {
-            out.println("  " + result.score().recommendation());
+            out.println("  " + result.score().recommendation(msg));
         }
         if (!result.actionsTaken().isEmpty() && (flagged || level == OutputLevel.VERBOSE)) {
             out.println("  " + msg.get("monitor.actions", String.join(", ", result.actionsTaken())));

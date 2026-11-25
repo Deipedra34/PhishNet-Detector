@@ -1,6 +1,7 @@
 package com.phishnet.mail;
 
 import com.phishnet.analyzer.EmailAnalyzer;
+import com.phishnet.i18n.Messages;
 import com.phishnet.mail.MailSource.IncomingMail;
 import com.phishnet.mail.MailSource.MoveOutcome;
 import com.phishnet.model.EmailAnalysisResult;
@@ -229,14 +230,14 @@ public final class MailMonitorService {
         MessagingException connectionLoss = null;
         if (plan.record()) {
             recorder.record(mail, analysis, score);
-            taken.add("recorded in scan history");
+            taken.add(Messages.text("monitor.action.recorded"));
         }
         if (plan.flag()) {
             try {
                 source.flagSuspicious(mail);
-                taken.add("flagged");
+                taken.add(Messages.text("monitor.action.flagged"));
             } catch (MessagingException e) {
-                failures.add("flag: " + e.getMessage());
+                failures.add(Messages.text("monitor.failure.flag", e.getMessage()));
                 connectionLoss = isConnectionLoss(e) ? e : null;
             }
         }
@@ -244,12 +245,11 @@ public final class MailMonitorService {
             try {
                 MoveOutcome outcome = source.move(mail, plan.moveTo());
                 taken.add(switch (outcome) {
-                    case MOVED, COPIED_AND_DELETED -> "moved to \"" + plan.moveTo() + "\"";
-                    case COPIED_ONLY -> "copied to \"" + plan.moveTo()
-                            + "\" (the server can't move messages safely, so the original was left in place)";
+                    case MOVED, COPIED_AND_DELETED -> Messages.text("monitor.action.moved", plan.moveTo());
+                    case COPIED_ONLY -> Messages.text("monitor.action.copied", plan.moveTo());
                 });
             } catch (MessagingException e) {
-                failures.add("move to \"" + plan.moveTo() + "\": " + e.getMessage());
+                failures.add(Messages.text("monitor.failure.move", plan.moveTo(), e.getMessage()));
                 connectionLoss = isConnectionLoss(e) ? e : null;
             }
         }

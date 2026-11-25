@@ -1,5 +1,6 @@
 package com.phishnet.analyzer;
 
+import com.phishnet.i18n.Text;
 import com.phishnet.model.PhishNetConfig;
 import com.phishnet.model.Signal;
 import com.phishnet.model.SignalCategory;
@@ -194,7 +195,7 @@ public final class UrlAnalyzer {
     }
 
     private static Signal malformed(String detail) {
-        return new Signal("malformedUrl", SignalCategory.URL, "URL is malformed or unparseable", detail);
+        return new Signal("malformedUrl", SignalCategory.URL, Text.of("signal.malformedUrl"), detail);
     }
 
     private static boolean isIpAddress(String host) {
@@ -272,7 +273,7 @@ public final class UrlAnalyzer {
             return List.of();
         }
         return List.of(new Signal("ipAddressHost", SignalCategory.URL,
-                "URL uses a raw IP address instead of a domain name", c.host()));
+                Text.of("signal.ipAddressHost"), c.host()));
     }
 
     private List<Signal> detectSuspiciousTld(UrlComponents c) {
@@ -283,7 +284,7 @@ public final class UrlAnalyzer {
         for (String suspicious : config.suspiciousTlds()) {
             if (tld.equals(suspicious.toLowerCase(Locale.ROOT))) {
                 return List.of(new Signal("suspiciousTld", SignalCategory.URL,
-                        "URL uses a TLD commonly abused for phishing", "." + tld));
+                        Text.of("signal.suspiciousTld"), "." + tld));
             }
         }
         return List.of();
@@ -297,7 +298,7 @@ public final class UrlAnalyzer {
         for (String shortener : config.urlShorteners()) {
             if (registrable.equals(shortener.toLowerCase(Locale.ROOT))) {
                 return List.of(new Signal("urlShortener", SignalCategory.URL,
-                        "URL uses a link-shortening service, which hides the real destination",
+                        Text.of("signal.urlShortener"),
                         registrable));
             }
         }
@@ -332,7 +333,7 @@ public final class UrlAnalyzer {
             String decodedLabel = HomoglyphUtil.decodeHost(label);
             if (HomoglyphUtil.isMixedScript(decodedLabel)) {
                 return List.of(new Signal("homograph", SignalCategory.URL,
-                        "Domain label mixes character scripts, a common homograph/IDN spoofing technique",
+                        Text.of("signal.homograph.mixedScript"),
                         decodedLabel));
             }
         }
@@ -343,13 +344,13 @@ public final class UrlAnalyzer {
             String normalizedBrand = brand.toLowerCase(Locale.ROOT);
             if (skeleton.equals(normalizedBrand)) {
                 return List.of(new Signal("homograph", SignalCategory.URL,
-                        "Domain uses look-alike characters to visually mimic brand '" + brand + "'",
+                        Text.of("signal.homograph.brand", brand),
                         HomoglyphUtil.decodeHost(c.host())));
             }
         }
         // Punycode/non-ASCII with no brand match is still unusual for a legitimate site.
         return List.of(new Signal("homograph", SignalCategory.URL,
-                "Domain contains internationalized/punycode-encoded characters",
+                Text.of("signal.homograph.punycode"),
                 HomoglyphUtil.decodeHost(c.host())));
     }
 
@@ -379,7 +380,7 @@ public final class UrlAnalyzer {
         }
         if (bestBrand != null && bestDistance <= maxDistance) {
             return List.of(new Signal("typosquatting", SignalCategory.URL,
-                    "Domain closely resembles brand '" + bestBrand + "' (edit distance " + bestDistance + ")",
+                    Text.of("signal.typosquatting.similar", bestBrand, bestDistance),
                     c.registrableDomain()));
         }
 
@@ -388,7 +389,7 @@ public final class UrlAnalyzer {
             String normalizedBrand = brand.toLowerCase(Locale.ROOT);
             if (domain.length() > normalizedBrand.length() && domain.contains(normalizedBrand)) {
                 return List.of(new Signal("typosquatting", SignalCategory.URL,
-                        "Domain embeds brand name '" + normalizedBrand + "' alongside other text",
+                        Text.of("signal.typosquatting.embedded", normalizedBrand),
                         c.registrableDomain()));
             }
         }
@@ -409,8 +410,7 @@ public final class UrlAnalyzer {
                 int distance = LevenshteinDistance.distance(token, normalizedBrand);
                 if (distance > 0 && distance <= maxDistance) {
                     return List.of(new Signal("typosquatting", SignalCategory.URL,
-                            "Domain segment '" + token + "' closely resembles brand '" + normalizedBrand
-                                    + "' (edit distance " + distance + ")",
+                            Text.of("signal.typosquatting.segment", token, normalizedBrand, distance),
                             c.registrableDomain()));
                 }
             }
@@ -422,7 +422,7 @@ public final class UrlAnalyzer {
                 for (String brand : config.brands()) {
                     if (label.equalsIgnoreCase(brand) && !domain.equals(brand.toLowerCase(Locale.ROOT))) {
                         return List.of(new Signal("typosquatting", SignalCategory.URL,
-                                "Brand name '" + brand + "' used as a subdomain of an unrelated domain",
+                                Text.of("signal.typosquatting.subdomain", brand),
                                 c.host()));
                     }
                 }
@@ -438,13 +438,13 @@ public final class UrlAnalyzer {
 
         if (c.rawUrl().length() > scoring.longUrlThreshold()) {
             signals.add(new Signal("longOrObfuscatedUrl", SignalCategory.URL,
-                    "URL is abnormally long (" + c.rawUrl().length() + " characters)", c.rawUrl()));
+                    Text.of("signal.longOrObfuscatedUrl", c.rawUrl().length()), c.rawUrl()));
         }
 
         int paramCount = c.queryParams().values().stream().mapToInt(List::size).sum();
         if (paramCount > scoring.maxQueryParams()) {
             signals.add(new Signal("excessiveQueryParams", SignalCategory.URL,
-                    "URL has an excessive number of query parameters (" + paramCount + ")", null));
+                    Text.of("signal.excessiveQueryParams", paramCount), null));
         }
 
         Matcher percentMatcher = PERCENT_ENCODED_PATTERN.matcher(c.rawUrl());
@@ -454,13 +454,13 @@ public final class UrlAnalyzer {
         }
         if (encodedCount >= scoring.encodedCharThreshold()) {
             signals.add(new Signal("encodedCharacters", SignalCategory.URL,
-                    "URL contains many percent-encoded characters (" + encodedCount + "), often used to obfuscate content",
+                    Text.of("signal.encodedCharacters", encodedCount),
                     null));
         }
 
         if (containsNestedRedirect(c)) {
             signals.add(new Signal("nestedRedirect", SignalCategory.URL,
-                    "URL appears to embed another URL in its query string, a common open-redirect phishing pattern",
+                    Text.of("signal.nestedRedirect"),
                     null));
         }
 

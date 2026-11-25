@@ -1,5 +1,8 @@
 package com.phishnet.model;
 
+import com.phishnet.i18n.Messages;
+import com.phishnet.i18n.Text;
+
 import java.util.Objects;
 
 /**
@@ -15,12 +18,27 @@ public final class Signal {
     private final SignalCategory category;
     private final String description;
     private final String evidence;
+    /** The description as a message, or null for a signal built from plain text. */
+    private final Text text;
 
     public Signal(String id, SignalCategory category, String description, String evidence) {
+        this(id, category, description, evidence, null);
+    }
+
+    /**
+     * A signal whose description can be shown in any supported language;
+     * {@link #description()} is its English text.
+     */
+    public Signal(String id, SignalCategory category, Text description, String evidence) {
+        this(id, category, Objects.requireNonNull(description, "description").english(), evidence, description);
+    }
+
+    private Signal(String id, SignalCategory category, String description, String evidence, Text text) {
         this.id = Objects.requireNonNull(id, "id");
         this.category = Objects.requireNonNull(category, "category");
         this.description = Objects.requireNonNull(description, "description");
         this.evidence = evidence == null ? "" : evidence;
+        this.text = text;
     }
 
     public Signal(String id, SignalCategory category, String description) {
@@ -39,6 +57,11 @@ public final class Signal {
     /** Human-readable explanation of why this signal fired. */
     public String description() {
         return description;
+    }
+
+    /** {@link #description()} in {@code messages}' language (as-is for a signal built from plain text). */
+    public String description(Messages messages) {
+        return text == null ? description : text.in(messages);
     }
 
     /** Optional extra detail (e.g. the matched brand, the offending keyword). */

@@ -114,7 +114,7 @@ final class FeedsCommand implements Callable<Integer> {
                 String name = result.source().displayName() + ":";
                 switch (result.outcome()) {
                     case UPDATED -> out.println(String.format("  %-11s %s", name,
-                            Messages.text("feeds.result.updated", FeedStatus.entryCount(result.entries()))));
+                            Messages.text("feeds.result.updated", FeedStatus.entryCount(Messages.current(), result.entries()))));
                     case SKIPPED -> out.println(String.format("  %-11s %s", name,
                             Messages.text("feeds.result.skipped", result.message())));
                     case FAILED -> {

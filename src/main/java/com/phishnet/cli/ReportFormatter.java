@@ -36,25 +36,25 @@ public final class ReportFormatter {
         } else {
             sb.append(msg.get("report.signals")).append('\n');
             for (Signal signal : score.signals()) {
-                sb.append("  - [").append(signal.id()).append("] ").append(signal.description());
+                sb.append("  - [").append(signal.id()).append("] ").append(signal.description(msg));
                 if (!signal.evidence().isEmpty()) {
                     sb.append(" (").append(signal.evidence()).append(")");
                 }
                 sb.append('\n');
             }
         }
-        sb.append(msg.get("report.recommendation", score.recommendation())).append('\n');
+        sb.append(msg.get("report.recommendation", score.recommendation(msg))).append('\n');
         return sb.toString();
     }
 
     public String json(String label, RiskScore score) {
-        return writeJson(toMap(label, score));
+        return writeJson(toMap(label, score, Messages.current()));
     }
 
     public String jsonBatch(List<AnalysisEntry> entries) {
         List<Map<String, Object>> asMaps = new ArrayList<>();
         for (AnalysisEntry entry : entries) {
-            asMaps.add(toMap(entry.label(), entry.score()));
+            asMaps.add(toMap(entry.label(), entry.score(), Messages.current()));
         }
         return writeJson(asMaps);
     }
@@ -65,18 +65,26 @@ public final class ReportFormatter {
      * shape the --json flag prints, adding its own fields on top.
      */
     public static Map<String, Object> toMap(String label, RiskScore score) {
+        return toMap(label, score, Messages.english());
+    }
+
+    /**
+     * Same, with the recommendation and signal descriptions in {@code messages}' language.
+     * Keys and the level/category values are always English.
+     */
+    public static Map<String, Object> toMap(String label, RiskScore score, Messages messages) {
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("target", label);
         root.put("score", score.score());
         root.put("level", score.level().name());
-        root.put("recommendation", score.recommendation());
+        root.put("recommendation", score.recommendation(messages));
 
         List<Map<String, Object>> signals = new ArrayList<>();
         for (Signal signal : score.signals()) {
             Map<String, Object> signalMap = new LinkedHashMap<>();
             signalMap.put("id", signal.id());
             signalMap.put("category", signal.category().name());
-            signalMap.put("description", signal.description());
+            signalMap.put("description", signal.description(messages));
             signalMap.put("evidence", signal.evidence());
             signals.add(signalMap);
         }

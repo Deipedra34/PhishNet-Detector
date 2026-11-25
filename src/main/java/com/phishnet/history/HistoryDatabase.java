@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.phishnet.cli.HistoryWriter.TargetType;
+import com.phishnet.i18n.Messages;
 import com.phishnet.model.DomainAgeResult;
 import com.phishnet.model.RiskLevel;
 import com.phishnet.model.RiskScore;
@@ -187,7 +188,7 @@ public final class HistoryDatabase {
             }
         } catch (SQLException | IOException | RuntimeException e) {
             if (!warned) {
-                err.println("Warning: could not write scan history database " + file + ": " + e.getMessage());
+                err.println(Messages.text("history.db.writeFailed", file, e.getMessage()));
                 warned = true;
             }
         }

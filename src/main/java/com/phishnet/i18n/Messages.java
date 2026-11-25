@@ -84,6 +84,7 @@ public final class Messages {
 
     /**
      * The text for {@code key}, with {@code {0}}, {@code {1}}, ... replaced by {@code args}.
+     * A {@link Localized} argument is rendered in this language too.
      *
      * @throws MissingResourceException if no bundle (not even the English one) has the key
      */
@@ -100,7 +101,8 @@ public final class Messages {
             int close = c == '{' ? text.indexOf('}', i) : -1;
             int index = close > i + 1 && close <= i + 3 ? placeholderIndex(text.substring(i + 1, close)) : -1;
             if (index >= 0 && index < args.length) {
-                out.append(args[index]);
+                Object arg = args[index];
+                out.append(arg instanceof Localized localized ? localized.in(this) : arg);
                 i = close + 1;
             } else {
                 out.append(c);

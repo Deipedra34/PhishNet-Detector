@@ -1,5 +1,6 @@
 package com.phishnet.ml;
 
+import com.phishnet.i18n.Messages;
 import com.phishnet.model.DomainAgeResult;
 import com.phishnet.model.PhishNetConfig;
 import com.phishnet.model.UrlAnalysisResult;
@@ -68,8 +69,7 @@ public final class MlScorer {
         try {
             return of(MlModel.load(modelFile), config);
         } catch (IOException | RuntimeException e) {
-            err.println("Warning: ML model " + modelFile + " could not be loaded (" + e.getMessage()
-                    + "); skipping the ML score. Retrain it with: phishnet model train");
+            err.println(Messages.text("ml.loadFailed", modelFile, e.getMessage()));
             return DISABLED;
         }
     }
@@ -79,15 +79,13 @@ public final class MlScorer {
         try {
             model = MlModel.train(TrainingData.bundled());
         } catch (IOException | RuntimeException e) {
-            err.println("Warning: could not train the ML model from the bundled dataset ("
-                    + e.getMessage() + "); skipping the ML score");
+            err.println(Messages.text("ml.trainFailed", e.getMessage()));
             return DISABLED;
         }
         try {
             model.save(modelFile);
         } catch (IOException | RuntimeException e) {
-            err.println("Warning: could not save the ML model to " + modelFile + " (" + e.getMessage()
-                    + "); it will be retrained on the next run");
+            err.println(Messages.text("ml.saveFailed", modelFile, e.getMessage()));
         }
         return of(model, config);
     }

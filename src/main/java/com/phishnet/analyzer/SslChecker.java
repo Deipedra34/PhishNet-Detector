@@ -1,5 +1,6 @@
 package com.phishnet.analyzer;
 
+import com.phishnet.i18n.Text;
 import com.phishnet.model.CertificateInfo;
 import com.phishnet.model.Signal;
 import com.phishnet.model.SignalCategory;
@@ -53,7 +54,7 @@ public final class SslChecker {
         } catch (IOException | GeneralSecurityException e) {
             List<Signal> signals = new ArrayList<>();
             signals.add(new Signal("sslMissing", SignalCategory.SSL,
-                    "Could not establish a TLS connection or retrieve a certificate",
+                    Text.of("signal.sslMissing"),
                     e.getMessage()));
             return new SslCheckResult(host, false, false, false, false, null, signals);
         }
@@ -66,15 +67,15 @@ public final class SslChecker {
         boolean expired = info.notAfter() != null && Instant.now().isAfter(info.notAfter());
         if (expired) {
             signals.add(new Signal("sslExpired", SignalCategory.SSL,
-                    "TLS certificate has expired", "notAfter=" + info.notAfter()));
+                    Text.of("signal.sslExpired"), "notAfter=" + info.notAfter()));
         }
 
         if (info.isSelfSigned()) {
             signals.add(new Signal("sslSelfSigned", SignalCategory.SSL,
-                    "TLS certificate is self-signed", info.subjectDn()));
+                    Text.of("signal.sslSelfSigned"), info.subjectDn()));
         } else if (!info.isTrustedByDefaultCa()) {
             signals.add(new Signal("sslUntrustedCa", SignalCategory.SSL,
-                    "TLS certificate was not issued by a trusted certificate authority",
+                    Text.of("signal.sslUntrustedCa"),
                     info.issuerDn()));
         }
 

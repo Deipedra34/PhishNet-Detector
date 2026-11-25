@@ -79,10 +79,10 @@ final class QueueWorkerReporter implements QueueWorker.Listener {
                     Thread.currentThread().getName()) + waited(job));
             DomainAgeResult age = result.domainAge();
             if (!age.isSkipped()) {
-                out.println("  " + msg.get("queue.domainAge", age.formatAge()));
+                out.println("  " + msg.get("queue.domainAge", age.formatAge(msg)));
             }
             for (Signal signal : result.score().signals()) {
-                out.println("  [" + signal.id() + "] " + signal.description()
+                out.println("  [" + signal.id() + "] " + signal.description(msg)
                         + (signal.evidence().isEmpty() ? "" : " (" + MonitorReporter.clean(signal.evidence(), "") + ")"));
             }
         } else if (risk != RiskLevel.LOW && !result.score().signals().isEmpty()) {

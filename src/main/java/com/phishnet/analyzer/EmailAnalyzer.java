@@ -1,5 +1,6 @@
 package com.phishnet.analyzer;
 
+import com.phishnet.i18n.Text;
 import com.phishnet.model.EmailAnalysisResult;
 import com.phishnet.model.PhishNetConfig;
 import com.phishnet.model.Signal;
@@ -61,7 +62,7 @@ public final class EmailAnalyzer {
             message = parseMessage(emlStream);
         } catch (IllegalArgumentException e) {
             Signal malformed = new Signal("malformedEmail", SignalCategory.EMAIL,
-                    "Message could not be parsed as a valid email", e.getMessage());
+                    Text.of("signal.malformedEmail"), e.getMessage());
             return new EmailAnalysisResult("", "", "", "", List.of(), List.of(malformed));
         }
 
@@ -86,7 +87,7 @@ public final class EmailAnalyzer {
             linkResults.add(result);
             if (!result.signals().isEmpty()) {
                 signals.add(new Signal("riskyEmbeddedLink", SignalCategory.EMAIL,
-                        "Embedded link triggered its own risk signals", link));
+                        Text.of("signal.riskyEmbeddedLink"), link));
             }
         }
 
@@ -178,7 +179,7 @@ public final class EmailAnalyzer {
             for (String phrase : entry.getValue()) {
                 if (haystack.contains(phrase.toLowerCase(Locale.ROOT))) {
                     return List.of(new Signal("urgencyLanguage", SignalCategory.EMAIL,
-                            "Message uses urgency/threat language typical of phishing",
+                            Text.of("signal.urgencyLanguage"),
                             "[" + entry.getKey() + "] " + phrase));
                 }
             }
@@ -198,7 +199,7 @@ public final class EmailAnalyzer {
             String normalizedBrand = brand.toLowerCase(Locale.ROOT);
             if (lowerDisplayName.contains(normalizedBrand) && !senderDomain.contains(normalizedBrand)) {
                 signals.add(new Signal("senderMismatch", SignalCategory.EMAIL,
-                        "Display name references brand '" + brand + "' but sender address domain does not match",
+                        Text.of("signal.senderMismatch.brand", brand),
                         displayName + " <" + senderAddress + ">"));
                 break;
             }
@@ -207,7 +208,7 @@ public final class EmailAnalyzer {
         if (!replyToAddress.isEmpty() && !replyToAddress.equalsIgnoreCase(senderAddress)
                 && !domainOf(replyToAddress).equals(senderDomain)) {
             signals.add(new Signal("senderMismatch", SignalCategory.EMAIL,
-                    "Reply-To address domain differs from the sender address domain",
+                    Text.of("signal.senderMismatch.replyTo"),
                     senderAddress + " -> " + replyToAddress));
         }
 

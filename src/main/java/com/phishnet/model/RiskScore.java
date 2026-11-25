@@ -1,5 +1,7 @@
 package com.phishnet.model;
 
+import com.phishnet.i18n.Messages;
+
 import java.util.Collections;
 import java.util.List;
 
@@ -36,5 +38,14 @@ public final class RiskScore {
 
     public String recommendation() {
         return recommendation;
+    }
+
+    /**
+     * {@link #recommendation()} in {@code messages}' language. Only the scorer's standard
+     * recommendations have translations; any other text is returned as-is.
+     */
+    public String recommendation(Messages messages) {
+        String key = "recommendation." + level.name();
+        return recommendation.equals(Messages.english().get(key)) ? messages.get(key) : recommendation;
     }
 }

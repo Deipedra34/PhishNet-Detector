@@ -121,7 +121,7 @@ public final class Reporter {
         }
         out.println(msg.get("report.threatFeeds"));
         for (FeedStatus status : feedStatuses) {
-            out.println("  " + status.source().displayName() + ": " + status.describe());
+            out.println("  " + status.source().displayName() + ": " + status.describe(msg));
         }
     }
 
@@ -142,14 +142,14 @@ public final class Reporter {
             for (Signal signal : score.signals()) {
                 StringBuilder line = new StringBuilder("  ")
                         .append(AnsiColor.apply(symbol, colorEnabled, color))
-                        .append(" [").append(signal.id()).append("] ").append(signal.description());
+                        .append(" [").append(signal.id()).append("] ").append(signal.description(msg));
                 if (level == OutputLevel.VERBOSE && !signal.evidence().isEmpty()) {
                     line.append(" (").append(signal.evidence()).append(")");
                 }
                 out.println(line);
             }
         }
-        out.println(msg.get("report.recommendation", score.recommendation()));
+        out.println(msg.get("report.recommendation", score.recommendation(msg)));
     }
 
     /**
@@ -161,13 +161,13 @@ public final class Reporter {
         if (domainAge == null || domainAge.isSkipped()) {
             return;
         }
-        StringBuilder line = new StringBuilder(msg.get("report.domainAge", domainAge.formatAge()));
+        StringBuilder line = new StringBuilder(msg.get("report.domainAge", domainAge.formatAge(msg)));
         if (level == OutputLevel.VERBOSE) {
             if (domainAge.isKnown()) {
                 line.append(" (").append(msg.get("report.domainAge.known", domainAge.ageDays(),
                         domainAge.creationDate(), domainAge.whoisServer())).append(")");
             } else if (!domainAge.reason().isEmpty()) {
-                line.append(" (").append(domainAge.reason()).append(")");
+                line.append(" (").append(domainAge.reason(msg)).append(")");
             }
         }
         out.println(line);

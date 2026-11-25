@@ -1,5 +1,6 @@
 package com.phishnet.feeds;
 
+import com.phishnet.i18n.Text;
 import com.phishnet.model.Signal;
 import com.phishnet.model.SignalCategory;
 import com.phishnet.scoring.RiskScorer;
@@ -103,11 +104,11 @@ public final class ThreatFeedIndex {
         List<FeedMatch> urlMatches = matches.stream().filter(m -> m.kind() == FeedMatch.Kind.URL).toList();
         if (!urlMatches.isEmpty()) {
             return List.of(new Signal(RiskScorer.KNOWN_PHISHING_URL, SignalCategory.URL,
-                    "Known phishing URL (" + sources(urlMatches) + ")", evidence(urlMatches)));
+                    Text.of("signal.knownPhishingUrl", sources(urlMatches)), evidence(urlMatches)));
         }
         if (!matches.isEmpty()) {
             return List.of(new Signal(RiskScorer.KNOWN_PHISHING_DOMAIN, SignalCategory.DOMAIN,
-                    "Known phishing domain (" + sources(matches) + "): other URLs on this host are listed",
+                    Text.of("signal.knownPhishingDomain", sources(matches)),
                     evidence(matches)));
         }
         return List.of();
