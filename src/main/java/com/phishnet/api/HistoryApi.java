@@ -6,7 +6,6 @@ import com.phishnet.history.HistoryEntry;
 import com.phishnet.history.HistoryFilter;
 import com.phishnet.history.HistoryStats;
 import com.phishnet.model.RiskLevel;
-import io.javalin.http.BadRequestResponse;
 import io.javalin.http.Context;
 
 import java.sql.SQLException;
@@ -105,11 +104,12 @@ final class HistoryApi {
         try {
             value = Integer.parseInt(raw.trim());
         } catch (NumberFormatException e) {
-            throw new BadRequestResponse("Query parameter '" + name + "' must be a whole number");
+            throw ApiException.badRequest("api.error.paramNotNumber", name);
         }
         if (value < min || value > max) {
-            throw new BadRequestResponse("Query parameter '" + name + "' must be "
-                    + (max == Integer.MAX_VALUE ? min + " or more" : "between " + min + " and " + max));
+            throw max == Integer.MAX_VALUE
+                    ? ApiException.badRequest("api.error.paramMin", name, min)
+                    : ApiException.badRequest("api.error.paramRange", name, min, max);
         }
         return value;
     }
@@ -128,7 +128,7 @@ final class HistoryApi {
             }
             names.add(constant.name());
         }
-        throw new BadRequestResponse("Query parameter '" + name + "' must be one of " + String.join(", ", names));
+        throw ApiException.badRequest("api.error.paramOneOf", name, String.join(", ", names));
     }
 
     static List<Map<String, Object>> toJson(List<HistoryEntry> entries) {

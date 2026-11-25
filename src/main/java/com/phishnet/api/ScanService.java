@@ -6,6 +6,7 @@ import com.phishnet.analyzer.UrlAnalyzer;
 import com.phishnet.analyzer.WhoisClient;
 import com.phishnet.cli.ReportFormatter;
 import com.phishnet.history.HistoryDatabase;
+import com.phishnet.i18n.Messages;
 import com.phishnet.model.DomainAgeResult;
 import com.phishnet.model.EmailAnalysisResult;
 import com.phishnet.model.PhishNetConfig;
@@ -58,6 +59,14 @@ public final class ScanService {
     }
 
     public Map<String, Object> scanUrl(String url) {
+        return scanUrl(url, Messages.english());
+    }
+
+    /**
+     * Same, with the human-readable text (recommendation, signal descriptions, domain
+     * age) in {@code messages}' language. Keys and machine-readable values stay English.
+     */
+    public Map<String, Object> scanUrl(String url, Messages messages) {
         UrlAnalysisResult result = urlAnalyzer.analyze(url);
         // A fresh checker per request: DomainAgeChecker's per-run caches (results, and
         // servers that failed once) aren't thread-safe and would otherwise live, and go
@@ -70,13 +79,18 @@ public final class ScanService {
             history.recordUrl(url, result.components(), score, domainAge);
         }
 
-        Map<String, Object> root = withType(ReportFormatter.toMap(url, score), "URL");
-        root.put("domainAge", domainAgeMap(domainAge));
+        Map<String, Object> root = withType(ReportFormatter.toMap(url, score, messages), "URL");
+        root.put("domainAge", domainAgeMap(domainAge, messages));
         return root;
     }
 
     /** Analyzes a raw .eml message. Doesn't close the stream. */
     public Map<String, Object> scanEmail(String label, InputStream eml) {
+        return scanEmail(label, eml, Messages.english());
+    }
+
+    /** Same, with the human-readable text in {@code messages}' language. Doesn't close the stream. */
+    public Map<String, Object> scanEmail(String label, InputStream eml, Messages messages) {
         EmailAnalysisResult result = emailAnalyzer.analyze(eml);
         RiskScore score = scorer.score(result.allSignals());
         if (history != null) {
@@ -94,7 +108,7 @@ public final class ScanService {
         }
         email.put("links", links);
 
-        Map<String, Object> root = withType(ReportFormatter.toMap(label, score), "EMAIL");
+        Map<String, Object> root = withType(ReportFormatter.toMap(label, score, messages), "EMAIL");
         root.put("email", email);
         return root;
     }
@@ -108,7 +122,7 @@ public final class ScanService {
         return root;
     }
 
-    private static Map<String, Object> domainAgeMap(DomainAgeResult domainAge) {
+    private static Map<String, Object> domainAgeMap(DomainAgeResult domainAge, Messages messages) {
         Map<String, Object> map = new LinkedHashMap<>();
         map.put("status", domainAge.status().name());
         switch (domainAge.status()) {
@@ -116,12 +130,12 @@ public final class ScanService {
                 map.put("domain", domainAge.domain());
                 map.put("creationDate", domainAge.creationDate().toString());
                 map.put("ageDays", domainAge.ageDays());
-                map.put("age", domainAge.formatAge());
+                map.put("age", domainAge.formatAge(messages));
                 map.put("whoisServer", domainAge.whoisServer());
             }
             case UNKNOWN -> {
                 map.put("domain", domainAge.domain());
-                map.put("reason", domainAge.reason());
+                map.put("reason", domainAge.reason(messages));
             }
             case SKIPPED -> {
                 // Nothing was looked up - status alone says so.

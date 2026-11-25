@@ -5,10 +5,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.phishnet.feeds.ThreatFeedService;
 import com.phishnet.history.HistoryDatabase;
+import com.phishnet.i18n.Messages;
+import com.phishnet.i18n.Text;
 import io.javalin.Javalin;
 import io.javalin.config.JavalinConfig;
 import io.javalin.config.SizeUnit;
-import io.javalin.http.BadRequestResponse;
 import io.javalin.http.ContentType;
 import io.javalin.http.Context;
 import io.javalin.http.HttpResponseException;
@@ -89,8 +90,11 @@ public final class ApiServer {
     static final String HEALTH_PATH = "/api/health";
 
     /** The 401 message - identical for a missing and a wrong key. */
-    static final String UNAUTHORIZED_MESSAGE = "Missing or invalid API key. Send the key that 'phishnet serve' "
-            + "printed in the " + API_KEY_HEADER + " header (by default it is stored in ~/.phishnet/api-key).";
+    static final Text UNAUTHORIZED_TEXT = Text.of("api.error.unauthorized", API_KEY_HEADER);
+    static final String UNAUTHORIZED_MESSAGE = UNAUTHORIZED_TEXT.english();
+
+    /** Where the before-handler keeps the request's {@link Messages}. */
+    private static final String MESSAGES_ATTRIBUTE = "phishnet.messages";
 
     /** The dashboard's entry page, served for every client-side route. */
     static final String DASHBOARD_INDEX = "index.html";
@@ -101,7 +105,7 @@ public final class ApiServer {
     private final ScanService scanner;
     private final PrintStream log;
     private final long maxRequestBytes;
-    private final String tooLargeMessage;
+    private final Text tooLargeText;
     private final ObjectMapper mapper = new ObjectMapper();
     /** Created by {@link #start}, once the optional read-side components below are set. */
     private Javalin app;
@@ -128,7 +132,7 @@ public final class ApiServer {
         this.scanner = scanner;
         this.log = log;
         this.maxRequestBytes = maxRequestBytes;
-        this.tooLargeMessage = "Request body too large (max " + describeSize(maxRequestBytes) + ")";
+        this.tooLargeText = Text.of("api.error.tooLarge", describeSize(maxRequestBytes));
     }
 
     /**
@@ -243,6 +247,10 @@ public final class ApiServer {
         config.jetty.multipartConfig.maxInMemoryFileSize((int) maxRequestBytes, SizeUnit.BYTES);
 
         config.routes.before("/api/*", ctx -> {
+            // Before anything can fail, so every error message is in the request's language too.
+            Messages messages = ApiLanguage.fromHeader(ctx.header(ApiLanguage.HEADER));
+            ctx.attribute(MESSAGES_ATTRIBUTE, messages);
+            ctx.header("Content-Language", messages.locale().getLanguage());
             // First, so every response to an extension - errors included - carries it.
             allowExtensionOrigin(ctx);
             // Reject a declared-oversized body up front, before reading any of it.
@@ -273,19 +281,16 @@ public final class ApiServer {
         // Overrides Javalin's built-in handler, so its own 404/405/413 responses use our JSON error shape too.
         config.routes.exception(HttpResponseException.class, (e, ctx) -> {
             HttpStatus status = HttpStatus.forStatus(e.getStatus());
-            // Javalin's own body-limit 413 just says "Content Too Large"; say what the limit is.
-            String message = status == HttpStatus.CONTENT_TOO_LARGE ? tooLargeMessage : e.getMessage();
-            respondError(ctx, status, message);
+            respondError(ctx, status, errorMessage(e, status, ctx));
         });
         config.routes.exception(SQLException.class, (e, ctx) -> {
-            log.println("Error: could not read the scan history database for " + ctx.method() + " " + ctx.path()
-                    + ": " + e.getMessage());
-            respondError(ctx, HttpStatus.INTERNAL_SERVER_ERROR, "Could not read the scan history database");
+            log.println(Messages.text("api.log.historyReadFailed", ctx.method(), ctx.path(), e.getMessage()));
+            respondError(ctx, HttpStatus.INTERNAL_SERVER_ERROR, messages(ctx).get("api.error.historyRead"));
         });
         config.routes.exception(Exception.class, (e, ctx) -> {
-            log.println("Error: unexpected failure handling " + ctx.method() + " " + ctx.path());
+            log.println(Messages.text("api.log.unexpected", ctx.method(), ctx.path()));
             e.printStackTrace(log);
-            respondError(ctx, HttpStatus.INTERNAL_SERVER_ERROR, "Internal server error");
+            respondError(ctx, HttpStatus.INTERNAL_SERVER_ERROR, messages(ctx).get("api.error.internal"));
         });
     }
 
@@ -309,8 +314,7 @@ public final class ApiServer {
             }
             // A missing file (e.g. an old hashed asset) is a 404 too, not the app's HTML.
             if (apiPath || path.substring(path.lastIndexOf('/') + 1).contains(".")) {
-                throw new HttpResponseException(HttpStatus.NOT_FOUND.getCode(),
-                        "Endpoint " + ctx.method() + " " + path + " not found");
+                throw new ApiException(HttpStatus.NOT_FOUND, Text.of("api.error.notFound", ctx.method(), path));
             }
             ctx.header("Cache-Control", "no-cache");
             ctx.contentType(ContentType.TEXT_HTML).result(Files.newInputStream(index));
@@ -323,9 +327,9 @@ public final class ApiServer {
         JsonNode body = readJsonObject(ctx);
         String url = requiredText(body, "url");
         if (url.length() > MAX_URL_LENGTH) {
-            throw new BadRequestResponse("Field 'url' is too long (max " + MAX_URL_LENGTH + " characters)");
+            throw ApiException.badRequest("api.error.urlTooLong", MAX_URL_LENGTH);
         }
-        respond(ctx, HttpStatus.OK, scanner.scanUrl(url));
+        respond(ctx, HttpStatus.OK, scanner.scanUrl(url, messages(ctx)));
     }
 
     private void scanEmail(Context ctx) throws IOException {
@@ -333,27 +337,26 @@ public final class ApiServer {
             UploadedFile file = uploadedEmail(ctx);
             String label = file.filename() == null || file.filename().isBlank() ? "upload.eml" : file.filename();
             try (InputStream in = file.content()) {
-                respond(ctx, HttpStatus.OK, scanner.scanEmail(label, in));
+                respond(ctx, HttpStatus.OK, scanner.scanEmail(label, in, messages(ctx)));
             }
             return;
         }
         String raw = requiredText(readJsonObject(ctx), "raw");
         respond(ctx, HttpStatus.OK,
-                scanner.scanEmail("raw email", new ByteArrayInputStream(raw.getBytes(StandardCharsets.UTF_8))));
+                scanner.scanEmail("raw email", new ByteArrayInputStream(raw.getBytes(StandardCharsets.UTF_8)),
+                        messages(ctx)));
     }
 
     private HistoryApi history() {
         if (historyApi == null) {
-            throw new HttpResponseException(HttpStatus.SERVICE_UNAVAILABLE.getCode(),
-                    "Scan history is not available on this server");
+            throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, Text.of("api.error.historyUnavailable"));
         }
         return historyApi;
     }
 
     private FeedsApi feeds() {
         if (feedsApi == null) {
-            throw new HttpResponseException(HttpStatus.SERVICE_UNAVAILABLE.getCode(),
-                    "Threat feed status is not available on this server");
+            throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, Text.of("api.error.feedsUnavailable"));
         }
         return feedsApi;
     }
@@ -369,7 +372,7 @@ public final class ApiServer {
         // Digests are compared rather than the keys, so the comparison takes the same time
         // whatever the provided key's length or how much of it matches.
         if (provided == null || !MessageDigest.isEqual(sha256(provided), apiKeyDigest)) {
-            throw new HttpResponseException(HttpStatus.UNAUTHORIZED.getCode(), UNAUTHORIZED_MESSAGE);
+            throw new ApiException(HttpStatus.UNAUTHORIZED, UNAUTHORIZED_TEXT);
         }
     }
 
@@ -402,14 +405,17 @@ public final class ApiServer {
             long seconds = decision.retryAfterSeconds();
             // Headers set before throwing are kept on the error response.
             ctx.header("Retry-After", Long.toString(seconds));
-            throw new HttpResponseException(HttpStatus.TOO_MANY_REQUESTS.getCode(),
-                    rateLimitMessage(rateLimiter.requestsPerMinute(), seconds));
+            throw new ApiException(HttpStatus.TOO_MANY_REQUESTS, rateLimitText(rateLimiter.requestsPerMinute(), seconds));
         }
     }
 
     static String rateLimitMessage(int requestsPerMinute, long retryAfterSeconds) {
-        return "Too many scan requests: the limit is " + requestsPerMinute + " per minute per client. Try again in "
-                + retryAfterSeconds + (retryAfterSeconds == 1 ? " second." : " seconds.");
+        return rateLimitText(requestsPerMinute, retryAfterSeconds).english();
+    }
+
+    static Text rateLimitText(int requestsPerMinute, long retryAfterSeconds) {
+        return Text.of(retryAfterSeconds == 1 ? "api.error.rateLimited.one" : "api.error.rateLimited.other",
+                requestsPerMinute, retryAfterSeconds);
     }
 
     // --- CORS (browser extensions only) -------------------------------------------
@@ -453,15 +459,13 @@ public final class ApiServer {
             // Jetty rejects a multipart body that is malformed or exceeds the configured
             // limits by throwing (a checked ServletException, despite no throws clause
             // on the Kotlin side) while parsing it; neither is a server-side fault.
-            throw new BadRequestResponse("Could not read multipart upload (malformed, or larger than "
-                    + describeSize(maxRequestBytes) + ")");
+            throw ApiException.badRequest("api.error.multipartUnreadable", describeSize(maxRequestBytes));
         }
         if (file == null) {
-            throw new BadRequestResponse("Multipart request must include the .eml file in a form field named '"
-                    + EMAIL_UPLOAD_FIELD + "'");
+            throw ApiException.badRequest("api.error.multipartNoFile", EMAIL_UPLOAD_FIELD);
         }
         if (file.size() == 0) {
-            throw new BadRequestResponse("Uploaded email file is empty");
+            throw ApiException.badRequest("api.error.uploadEmpty");
         }
         return file;
     }
@@ -469,16 +473,16 @@ public final class ApiServer {
     private JsonNode readJsonObject(Context ctx) {
         String body = ctx.body();
         if (body.isBlank()) {
-            throw new BadRequestResponse("Request body is empty; expected a JSON object");
+            throw ApiException.badRequest("api.error.bodyEmpty");
         }
         JsonNode node;
         try {
             node = mapper.readTree(body);
         } catch (JsonProcessingException e) {
-            throw new BadRequestResponse("Request body is not valid JSON");
+            throw ApiException.badRequest("api.error.bodyNotJson");
         }
         if (node == null || !node.isObject()) {
-            throw new BadRequestResponse("Request body must be a JSON object");
+            throw ApiException.badRequest("api.error.bodyNotObject");
         }
         return node;
     }
@@ -486,26 +490,57 @@ public final class ApiServer {
     private static String requiredText(JsonNode body, String field) {
         JsonNode value = body.get(field);
         if (value == null || value.isNull()) {
-            throw new BadRequestResponse("Missing required field '" + field + "'");
+            throw ApiException.badRequest("api.error.fieldMissing", field);
         }
         if (!value.isTextual()) {
-            throw new BadRequestResponse("Field '" + field + "' must be a string");
+            throw ApiException.badRequest("api.error.fieldNotString", field);
         }
         String text = value.asText().trim();
         if (text.isEmpty()) {
-            throw new BadRequestResponse("Field '" + field + "' must not be empty");
+            throw ApiException.badRequest("api.error.fieldEmpty", field);
         }
         return text;
     }
 
     private HttpResponseException tooLarge() {
-        return new HttpResponseException(HttpStatus.CONTENT_TOO_LARGE.getCode(), tooLargeMessage);
+        return new ApiException(HttpStatus.CONTENT_TOO_LARGE, tooLargeText);
     }
 
     /** "5 MB" for whole megabytes, otherwise an exact byte count. */
-    private static String describeSize(long bytes) {
+    private static Text describeSize(long bytes) {
         long mb = 1024L * 1024L;
-        return bytes % mb == 0 ? (bytes / mb) + " MB" : bytes + " bytes";
+        return bytes % mb == 0 ? Text.of("api.size.megabytes", bytes / mb) : Text.of("api.size.bytes", bytes);
+    }
+
+    // --- language ---------------------------------------------------------------
+
+    /** The request's language, from its Accept-Language header (see {@link ApiLanguage}). */
+    private static Messages messages(Context ctx) {
+        Messages messages = ctx.attribute(MESSAGES_ATTRIBUTE);
+        return messages != null ? messages : ApiLanguage.fromHeader(ctx.header(ApiLanguage.HEADER));
+    }
+
+    /**
+     * An error's message in the request's language. Javalin's own 404 and 405 responses
+     * keep their English wording for English; other languages get a translation.
+     */
+    private String errorMessage(HttpResponseException e, HttpStatus status, Context ctx) {
+        Messages messages = messages(ctx);
+        if (e instanceof ApiException apiException) {
+            return apiException.message(messages);
+        }
+        if (status == HttpStatus.CONTENT_TOO_LARGE) {
+            // Javalin's own body-limit 413 just says "Content Too Large"; say what the limit is.
+            return tooLargeText.in(messages);
+        }
+        if (messages.locale().getLanguage().equals(Messages.LANGUAGES.get(0))) {
+            return e.getMessage();
+        }
+        return switch (status) {
+            case NOT_FOUND -> messages.get("api.error.notFound", ctx.method(), ctx.path());
+            case METHOD_NOT_ALLOWED -> messages.get("api.error.methodNotAllowed");
+            default -> e.getMessage();
+        };
     }
 
     // --- responses -------------------------------------------------------------
