@@ -1,4 +1,5 @@
 import { formatNumber } from "../format.js";
+import { useI18n } from "../i18n/index.js";
 
 /** Number of pages needed for `total` items, at least 1. */
 export function pageCount(total, pageSize) {
@@ -7,6 +8,7 @@ export function pageCount(total, pageSize) {
 
 /** Previous/next controls with a "21–40 of 135" summary. `page` is 1-based. */
 export default function Pagination({ page, pageSize, total, onPageChange, disabled }) {
+  const { t } = useI18n();
   const pages = pageCount(total, pageSize);
   if (total <= pageSize && page === 1) {
     return null;
@@ -14,22 +16,27 @@ export default function Pagination({ page, pageSize, total, onPageChange, disabl
   const first = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const last = Math.min(total, page * pageSize);
   return (
-    <nav className="pagination" aria-label="Pages">
+    <nav className="pagination" aria-label={t("pagination.label")}>
       <button type="button" onClick={() => onPageChange(1)} disabled={disabled || page <= 1}>
-        « First
+        {t("pagination.first")}
       </button>
       <button type="button" onClick={() => onPageChange(page - 1)} disabled={disabled || page <= 1}>
-        ‹ Previous
+        {t("pagination.previous")}
       </button>
       <span className="pagination-status">
-        {formatNumber(first)}–{formatNumber(last)} of {formatNumber(total)} · page {formatNumber(page)} of{" "}
-        {formatNumber(pages)}
+        {t("pagination.status", {
+          first: formatNumber(first),
+          last: formatNumber(last),
+          total: formatNumber(total),
+          page: formatNumber(page),
+          pages: formatNumber(pages),
+        })}
       </span>
       <button type="button" onClick={() => onPageChange(page + 1)} disabled={disabled || page >= pages}>
-        Next ›
+        {t("pagination.next")}
       </button>
       <button type="button" onClick={() => onPageChange(pages)} disabled={disabled || page >= pages}>
-        Last »
+        {t("pagination.last")}
       </button>
     </nav>
   );

@@ -1,26 +1,24 @@
 import { useCallback, useEffect, useState } from "react";
 import { defaultClient } from "../api/client.js";
 import { formatDateTime, formatDuration, formatNumber } from "../format.js";
+import { useI18n } from "../i18n/index.js";
 
-/** How each state reads, as `phishnet feeds status` describes it. */
+/**
+ * How each state reads, as `phishnet feeds status` describes it: its color, and
+ * whether it has its own explanation ("feeds.state.<STATE>.text"). The others show
+ * the server's detail instead.
+ */
 const STATES = {
-  FRESH: { label: "Fresh", tone: "good", text: "Cached and available to scans." },
-  STALE: {
-    label: "Stale",
-    tone: "warning",
-    text: "The cached copy is still used by scans; it's refreshed on the next CLI scan or `phishnet feeds update`.",
-  },
-  MISSING: {
-    label: "Missing",
-    tone: "critical",
-    text: "Nothing cached yet, so scans skip this feed. Run `phishnet feeds update`.",
-  },
-  DISABLED: { label: "Disabled", tone: "neutral", text: "Turned off in the config." },
-  NOT_CONFIGURED: { label: "Not configured", tone: "neutral", text: null },
-  OFF: { label: "Off", tone: "neutral", text: null },
+  FRESH: { tone: "good", explained: true },
+  STALE: { tone: "warning", explained: true },
+  MISSING: { tone: "critical", explained: true },
+  DISABLED: { tone: "neutral", explained: true },
+  NOT_CONFIGURED: { tone: "neutral", explained: false },
+  OFF: { tone: "neutral", explained: false },
 };
 
 export default function FeedsPage() {
+  const { t, rich } = useI18n();
   const [status, setStatus] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -42,15 +40,12 @@ export default function FeedsPage() {
   return (
     <section>
       <div className="page-title-row">
-        <h1>Threat feeds</h1>
+        <h1>{t("feeds.title")}</h1>
         <button type="button" onClick={load} disabled={loading}>
-          {loading ? "Checking..." : "Refresh status"}
+          {loading ? t("common.checking") : t("feeds.refresh")}
         </button>
       </div>
-      <p className="muted">
-        Cache state of the OpenPhish and PhishTank feeds scans are checked against. This page only reads the cache; to
-        download the feeds now, run <code>phishnet feeds update</code>.
-      </p>
+      <p className="muted">{rich("feeds.intro", { command: <code>phishnet feeds update</code> })}</p>
 
       {error ? (
         <p className="error" role="alert">
@@ -61,11 +56,11 @@ export default function FeedsPage() {
       {status ? (
         <>
           <dl className="details feed-meta">
-            <dt>Cache directory</dt>
+            <dt>{t("feeds.cacheDirectory")}</dt>
             <dd>
               <code>{status.cacheDirectory}</code>
             </dd>
-            <dt>Refresh interval</dt>
+            <dt>{t("feeds.refreshInterval")}</dt>
             <dd>{formatDuration(status.refreshIntervalSeconds)}</dd>
           </dl>
           <div className="feed-cards">
@@ -80,31 +75,34 @@ export default function FeedsPage() {
 }
 
 function FeedCard({ feed }) {
-  const state = STATES[feed.state] ?? { label: feed.state, tone: "neutral", text: null };
-  const explanation = state.text ?? feed.detail;
+  const { t } = useI18n();
+  const known = Object.hasOwn(STATES, feed.state);
+  const state = known ? STATES[feed.state] : { tone: "neutral", explained: false };
+  const label = known ? t(`feeds.state.${feed.state}`) : feed.state;
+  const explanation = state.explained ? t(`feeds.state.${feed.state}.text`) : feed.detail;
   const showCacheFacts = feed.available || feed.state === "MISSING";
   return (
-    <article className="panel feed-card" aria-label={`${feed.name} feed`}>
+    <article className="panel feed-card" aria-label={t("feeds.cardLabel", { name: feed.name })}>
       <header className="feed-card-header">
         <h2>{feed.name}</h2>
-        <span className={`state-badge tone-${state.tone}`}>{state.label}</span>
+        <span className={`state-badge tone-${state.tone}`}>{label}</span>
       </header>
       {explanation ? <p className="muted">{explanation}</p> : null}
       {showCacheFacts ? (
         <dl className="details">
-          <dt>Last refresh</dt>
+          <dt>{t("feeds.lastRefresh")}</dt>
           <dd>
             {feed.refreshedAt
-              ? `${formatDateTime(feed.refreshedAt)} (${formatDuration(feed.ageSeconds)} ago)`
-              : "Never"}
+              ? t("feeds.refreshedAgo", { time: formatDateTime(feed.refreshedAt), age: formatDuration(feed.ageSeconds) })
+              : t("feeds.never")}
           </dd>
-          <dt>Entries</dt>
+          <dt>{t("feeds.entries")}</dt>
           <dd>{formatNumber(feed.entries)}</dd>
         </dl>
       ) : null}
       {feed.lastError ? (
         <p className="feed-error">
-          <strong>Last download failed:</strong> {feed.lastError}
+          <strong>{t("feeds.lastError")}</strong> {feed.lastError}
         </p>
       ) : null}
     </article>

@@ -1,16 +1,18 @@
 import { useRef, useState } from "react";
 import { defaultClient } from "../api/client.js";
 import ScanResultCard from "../components/ScanResultCard.jsx";
+import { useI18n } from "../i18n/index.js";
 
 const MODES = [
-  { id: "url", label: "URL" },
-  { id: "email", label: "Email" },
+  { id: "url", label: "scan.mode.url" },
+  { id: "email", label: "scan.mode.email" },
 ];
 
 /** Same limit the API enforces on request bodies. */
 const MAX_EMAIL_BYTES = 5 * 1024 * 1024;
 
 export default function ScanPage() {
+  const { t } = useI18n();
   const [mode, setMode] = useState("url");
   const [url, setUrl] = useState("");
   const [rawEmail, setRawEmail] = useState("");
@@ -37,7 +39,7 @@ export default function ScanPage() {
     event.preventDefault();
     const target = url.trim();
     if (!target) {
-      setError("Enter a URL to scan.");
+      setError(t("scan.enterUrl"));
       return;
     }
     runScan((client) => client.scanUrl(target));
@@ -47,18 +49,18 @@ export default function ScanPage() {
     event.preventDefault();
     if (emailFile) {
       if (emailFile.size === 0) {
-        setError("The selected file is empty.");
+        setError(t("scan.fileEmpty"));
         return;
       }
       if (emailFile.size > MAX_EMAIL_BYTES) {
-        setError("The selected file is larger than the 5 MB the API accepts.");
+        setError(t("scan.fileTooLarge"));
         return;
       }
       runScan((client) => client.scanEmailFile(emailFile));
       return;
     }
     if (!rawEmail.trim()) {
-      setError("Paste the full email source (headers and body), or choose an .eml file.");
+      setError(t("scan.pasteEmail"));
       return;
     }
     runScan((client) => client.scanEmailText(rawEmail));
@@ -78,10 +80,10 @@ export default function ScanPage() {
 
   return (
     <section>
-      <h1>Scan</h1>
-      <p className="muted">Check a URL or an email message for phishing indicators.</p>
+      <h1>{t("scan.title")}</h1>
+      <p className="muted">{t("scan.intro")}</p>
 
-      <div className="tabs" role="tablist" aria-label="What to scan">
+      <div className="tabs" role="tablist" aria-label={t("scan.modes")}>
         {MODES.map((item) => (
           <button
             key={item.id}
@@ -91,14 +93,14 @@ export default function ScanPage() {
             className={mode === item.id ? "tab active" : "tab"}
             onClick={() => switchMode(item.id)}
           >
-            {item.label}
+            {t(item.label)}
           </button>
         ))}
       </div>
 
       {mode === "url" ? (
         <form className="scan-form" onSubmit={handleUrlSubmit}>
-          <label htmlFor="scan-url">URL</label>
+          <label htmlFor="scan-url">{t("scan.urlLabel")}</label>
           <input
             id="scan-url"
             type="text"
@@ -109,12 +111,12 @@ export default function ScanPage() {
             disabled={busy}
           />
           <button type="submit" disabled={busy}>
-            {busy ? "Scanning..." : "Scan URL"}
+            {busy ? t("scan.scanning") : t("scan.scanUrl")}
           </button>
         </form>
       ) : (
         <form className="scan-form" onSubmit={handleEmailSubmit}>
-          <label htmlFor="scan-email-file">Upload an .eml file</label>
+          <label htmlFor="scan-email-file">{t("scan.uploadLabel")}</label>
           <div className="file-row">
             <input
               id="scan-email-file"
@@ -126,12 +128,12 @@ export default function ScanPage() {
             />
             {emailFile ? (
               <button type="button" className="link-button" onClick={clearFile} disabled={busy}>
-                Clear
+                {t("common.clear")}
               </button>
             ) : null}
           </div>
 
-          <label htmlFor="scan-email-raw">or paste the raw email source</label>
+          <label htmlFor="scan-email-raw">{t("scan.rawLabel")}</label>
           <textarea
             id="scan-email-raw"
             rows={10}
@@ -142,7 +144,7 @@ export default function ScanPage() {
             disabled={busy || emailFile !== null}
           />
           <button type="submit" disabled={busy}>
-            {busy ? "Scanning..." : "Scan email"}
+            {busy ? t("scan.scanning") : t("scan.scanEmail")}
           </button>
         </form>
       )}

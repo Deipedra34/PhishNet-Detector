@@ -2,10 +2,9 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { defaultClient, RISK_LEVELS } from "../api/client.js";
 import { formatDateTime, formatNumber } from "../format.js";
+import { useI18n } from "../i18n/index.js";
 
 const TOP_DOMAINS = 10;
-
-const LEVEL_LABELS = { LOW: "Low", MEDIUM: "Medium", HIGH: "High" };
 
 /** Share of `total`, as a whole percentage for labels. */
 function percent(count, total) {
@@ -13,6 +12,7 @@ function percent(count, total) {
 }
 
 export default function StatsPage() {
+  const { t } = useI18n();
   const [stats, setStats] = useState(null);
   const [error, setError] = useState(null);
 
@@ -29,52 +29,54 @@ export default function StatsPage() {
 
   return (
     <section>
-      <h1>Stats</h1>
-      <p className="muted">Totals across the whole scan history, as `phishnet history stats` reports them.</p>
+      <h1>{t("stats.title")}</h1>
+      <p className="muted">{t("stats.intro")}</p>
 
       {error ? (
         <p className="error" role="alert">
           {error}
         </p>
       ) : null}
-      {!stats && !error ? <p className="muted">Loading...</p> : null}
+      {!stats && !error ? <p className="muted">{t("common.loading")}</p> : null}
       {stats ? <StatsView stats={stats} /> : null}
     </section>
   );
 }
 
 function StatsView({ stats }) {
+  const { t } = useI18n();
   if (stats.total === 0) {
-    return <p className="empty">No scans recorded yet, so there's nothing to summarize.</p>;
+    return <p className="empty">{t("stats.empty")}</p>;
   }
   const flagged = (stats.byRiskLevel.MEDIUM ?? 0) + (stats.byRiskLevel.HIGH ?? 0);
   return (
     <>
       <div className="stat-tiles">
-        <StatTile label="Total scans" value={formatNumber(stats.total)} />
+        <StatTile label={t("stats.total")} value={formatNumber(stats.total)} />
         <StatTile
-          label="Flagged (medium or high)"
+          label={t("stats.flagged")}
           value={formatNumber(flagged)}
-          note={`${percent(flagged, stats.total)}% of scans`}
+          note={t("stats.flaggedShare", { percent: percent(flagged, stats.total) })}
         />
         <StatTile
-          label="URLs / emails"
+          label={t("stats.byType")}
           value={`${formatNumber(stats.byType.URL ?? 0)} / ${formatNumber(stats.byType.EMAIL ?? 0)}`}
         />
-        <StatTile label="First scan" value={formatDateTime(stats.firstScan)} small />
-        <StatTile label="Last scan" value={formatDateTime(stats.lastScan)} small />
+        <StatTile label={t("stats.firstScan")} value={formatDateTime(stats.firstScan)} small />
+        <StatTile label={t("stats.lastScan")} value={formatDateTime(stats.lastScan)} small />
       </div>
 
       <div className="stats-grid">
         <section className="panel">
-          <h2>Scans by risk level</h2>
+          <h2>{t("stats.byRisk")}</h2>
           <ul className="bar-list">
             {RISK_LEVELS.map((level) => {
               const count = stats.byRiskLevel[level] ?? 0;
+              const label = t(`stats.level.${level}`);
               return (
-                <li key={level} className="bar-row" title={`${LEVEL_LABELS[level]}: ${formatNumber(count)} scans`}>
+                <li key={level} className="bar-row" title={t("stats.levelCount", { level: label, count: formatNumber(count) })}>
                   <Link className="bar-label" to={`/history?risk=${level}`}>
-                    {LEVEL_LABELS[level]}
+                    {label}
                   </Link>
                   <span className="bar-track">
                     <span
@@ -92,9 +94,9 @@ function StatsView({ stats }) {
         </section>
 
         <section className="panel">
-          <h2>Most frequently flagged domains</h2>
+          <h2>{t("stats.topDomains")}</h2>
           {stats.topFlaggedDomains.length === 0 ? (
-            <p className="muted">No domain has a medium or high risk scan yet.</p>
+            <p className="muted">{t("stats.noFlaggedDomains")}</p>
           ) : (
             <TopDomains domains={stats.topFlaggedDomains} />
           )}
@@ -115,11 +117,12 @@ function StatTile({ label, value, note, small }) {
 }
 
 function TopDomains({ domains }) {
+  const { t } = useI18n();
   const max = Math.max(...domains.map((item) => item.count), 1);
   return (
     <ol className="bar-list">
       {domains.map((item) => (
-        <li key={item.domain} className="bar-row" title={`${item.domain}: ${formatNumber(item.count)} flagged scans`}>
+        <li key={item.domain} className="bar-row" title={t("stats.domainCount", { domain: item.domain, count: formatNumber(item.count) })}>
           <Link className="bar-label domain" to={`/history?target=${encodeURIComponent(item.domain)}`}>
             {item.domain}
           </Link>

@@ -8,12 +8,14 @@ import {
   setConfiguredBaseUrl,
   setStoredApiKey,
 } from "../api/client.js";
+import { useI18n } from "../i18n/index.js";
 
 /**
  * Footer control for the API address. Blank (the default) means "the server this
  * dashboard was loaded from"; anything else is remembered in this browser.
  */
 export default function ApiSettings() {
+  const { t, language } = useI18n();
   const current = getConfiguredBaseUrl();
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(current);
@@ -40,10 +42,10 @@ export default function ApiSettings() {
     setBusy(true);
     setMessage(null);
     try {
-      await createApiClient({ baseUrl: normalized }).health();
+      await createApiClient({ baseUrl: normalized, language }).health();
     } catch (e) {
       setBusy(false);
-      setMessage({ error: true, text: `Not saved: ${e.message}` });
+      setMessage({ error: true, text: t("settings.notSaved", { message: e.message }) });
       return;
     }
     setConfiguredBaseUrl(normalized);
@@ -65,14 +67,14 @@ export default function ApiSettings() {
     return (
       <div className="api-settings">
         <span className="muted">
-          API: <code>{current || "this server"}</code>
+          {t("settings.api")} <code>{current || t("settings.thisServer")}</code>
         </span>
         <button type="button" className="link-button" onClick={() => setEditing(true)}>
-          Change
+          {t("settings.change")}
         </button>
         {hasKey ? (
           <button type="button" className="link-button" onClick={forgetKey}>
-            Forget API key
+            {t("settings.forgetKey")}
           </button>
         ) : null}
       </div>
@@ -82,26 +84,26 @@ export default function ApiSettings() {
   return (
     <form className="api-settings" onSubmit={save}>
       <label htmlFor="api-base-url" className="muted">
-        API address
+        {t("settings.address")}
       </label>
       <input
         id="api-base-url"
         type="text"
-        placeholder="blank = this server, e.g. /phishnet or http://localhost:8080"
+        placeholder={t("settings.placeholder")}
         value={value}
         onChange={(event) => setValue(event.target.value)}
         disabled={busy}
       />
       <button type="submit" disabled={busy}>
-        {busy ? "Checking..." : "Save"}
+        {busy ? t("common.checking") : t("common.save")}
       </button>
       {current ? (
         <button type="button" className="link-button" onClick={reset} disabled={busy}>
-          Use this server
+          {t("settings.useThisServer")}
         </button>
       ) : null}
       <button type="button" className="link-button" onClick={() => setEditing(false)} disabled={busy}>
-        Cancel
+        {t("common.cancel")}
       </button>
       {message ? (
         <p className={message.error ? "error" : "muted"} role="status">

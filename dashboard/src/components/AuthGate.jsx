@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { ApiError, UNAUTHORIZED_EVENT, defaultClient } from "../api/client.js";
+import { useI18n } from "../i18n/index.js";
 import ApiKeySetup from "./ApiKeySetup.jsx";
 
 /**
@@ -9,6 +10,7 @@ import ApiKeySetup from "./ApiKeySetup.jsx";
  * rejected later - say, after the key was regenerated - the key screen comes back.
  */
 export default function AuthGate({ children }) {
+  const { t } = useI18n();
   const [state, setState] = useState("checking");
 
   useEffect(() => {
@@ -34,7 +36,7 @@ export default function AuthGate({ children }) {
   }, []);
 
   if (state === "checking") {
-    return <p className="muted">Connecting to the PhishNet API...</p>;
+    return <p className="muted">{t("auth.connecting")}</p>;
   }
   if (state === "needs-key") {
     return <ApiKeySetup onSaved={() => setState("ok")} />;

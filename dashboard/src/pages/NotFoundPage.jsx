@@ -1,12 +1,12 @@
 import { Link } from "react-router-dom";
+import { useI18n } from "../i18n/index.js";
 
 export default function NotFoundPage() {
+  const { t, rich } = useI18n();
   return (
     <section>
-      <h1>Page not found</h1>
-      <p className="muted">
-        There's nothing here. <Link to="/">Go to the scanner</Link>.
-      </p>
+      <h1>{t("notFound.title")}</h1>
+      <p className="muted">{rich("notFound.text", { link: <Link to="/">{t("notFound.link")}</Link> })}</p>
     </section>
   );
 }

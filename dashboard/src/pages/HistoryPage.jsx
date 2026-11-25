@@ -4,11 +4,13 @@ import { defaultClient, RISK_LEVELS } from "../api/client.js";
 import Pagination, { pageCount } from "../components/Pagination.jsx";
 import RiskBadge from "../components/RiskBadge.jsx";
 import { formatAgeDays, formatDateTime, formatNumber } from "../format.js";
+import { useI18n } from "../i18n/index.js";
 
 const PAGE_SIZE = 20;
 const SEARCH_DELAY_MS = 300;
 
 export default function HistoryPage() {
+  const { t } = useI18n();
   // Filters live in the address bar, so a filtered view can be bookmarked or shared.
   const [searchParams, setSearchParams] = useSearchParams();
   const target = searchParams.get("target") ?? "";
@@ -93,44 +95,44 @@ export default function HistoryPage() {
 
   return (
     <section>
-      <h1>History</h1>
-      <p className="muted">Past scans recorded by the CLI and the API, newest first.</p>
+      <h1>{t("history.title")}</h1>
+      <p className="muted">{t("history.intro")}</p>
 
       <form className="filters" role="search" onSubmit={(event) => {
         event.preventDefault();
         updateParams({ target: targetInput.trim() });
       }}>
         <label className="filter">
-          <span>Search</span>
+          <span>{t("history.search")}</span>
           <input
             type="search"
-            placeholder="URL, domain, file name, or subject"
+            placeholder={t("history.searchPlaceholder")}
             value={targetInput}
             onChange={(event) => setTargetInput(event.target.value)}
           />
         </label>
         <label className="filter">
-          <span>Risk</span>
+          <span>{t("history.risk")}</span>
           <select value={risk} onChange={(event) => updateParams({ risk: event.target.value })}>
-            <option value="">All levels</option>
+            <option value="">{t("history.allLevels")}</option>
             {RISK_LEVELS.map((level) => (
               <option key={level} value={level}>
-                {level}
+                {t(`risk.${level}`)}
               </option>
             ))}
           </select>
         </label>
         <label className="filter">
-          <span>Type</span>
+          <span>{t("history.type")}</span>
           <select value={type} onChange={(event) => updateParams({ type: event.target.value })}>
-            <option value="">URLs and emails</option>
-            <option value="URL">URL</option>
-            <option value="EMAIL">Email</option>
+            <option value="">{t("history.allTypes")}</option>
+            <option value="URL">{t("history.typeUrl")}</option>
+            <option value="EMAIL">{t("history.typeEmail")}</option>
           </select>
         </label>
         {filtered ? (
           <button type="button" className="link-button" onClick={clearFilters}>
-            Clear filters
+            {t("history.clearFilters")}
           </button>
         ) : null}
       </form>
@@ -144,48 +146,43 @@ export default function HistoryPage() {
       {data ? (
         <>
           <p className="muted">
-            {formatNumber(data.total)} {filtered ? "matching scans" : "scans recorded"}
+            {t(filtered ? "history.matching" : "history.recorded", { total: formatNumber(data.total) })}
           </p>
           <HistoryTable scans={data.scans} loading={loading} filtered={filtered} />
           <Pagination page={page} pageSize={PAGE_SIZE} total={data.total} onPageChange={goToPage} disabled={loading} />
         </>
       ) : loading ? (
-        <p className="muted">Loading...</p>
+        <p className="muted">{t("common.loading")}</p>
       ) : null}
     </section>
   );
 }
 
 function HistoryTable({ scans, loading, filtered }) {
+  const { t } = useI18n();
   if (scans.length === 0) {
-    return (
-      <p className="empty">
-        {filtered
-          ? "No scans match these filters."
-          : "No scans recorded yet. Scan something on the Scan page, or with the CLI."}
-      </p>
-    );
+    return <p className="empty">{t(filtered ? "history.noMatches" : "history.empty")}</p>;
   }
   return (
     <div className="table-wrap" aria-busy={loading}>
       <table className="data-table">
         <thead>
           <tr>
-            <th scope="col">When</th>
-            <th scope="col">Type</th>
-            <th scope="col">Target</th>
-            <th scope="col">Risk</th>
+            <th scope="col">{t("history.column.when")}</th>
+            <th scope="col">{t("history.column.type")}</th>
+            <th scope="col">{t("history.column.target")}</th>
+            <th scope="col">{t("history.column.risk")}</th>
             <th scope="col" className="num">
-              Score
+              {t("history.column.score")}
             </th>
-            <th scope="col">Domain age</th>
+            <th scope="col">{t("history.column.domainAge")}</th>
           </tr>
         </thead>
         <tbody>
           {scans.map((scan) => (
             <tr key={scan.id}>
               <td className="nowrap">{formatDateTime(scan.timestamp)}</td>
-              <td>{scan.type}</td>
+              <td>{scan.type === "URL" || scan.type === "EMAIL" ? t(`type.${scan.type}`) : scan.type}</td>
               <td className="target-cell">
                 <span title={scan.target}>{scan.target}</span>
                 {scan.subject ? <span className="muted small">{scan.subject}</span> : null}

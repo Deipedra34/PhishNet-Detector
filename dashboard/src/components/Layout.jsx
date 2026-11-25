@@ -1,19 +1,21 @@
 import { Link, NavLink, Outlet } from "react-router-dom";
+import { useI18n } from "../i18n/index.js";
 import ApiSettings from "./ApiSettings.jsx";
 import AuthGate from "./AuthGate.jsx";
 
 const NAV_ITEMS = [
-  { to: "/", label: "Scan", end: true },
-  { to: "/history", label: "History" },
-  { to: "/stats", label: "Stats" },
-  { to: "/feeds", label: "Feeds" },
+  { to: "/", label: "nav.scan", end: true },
+  { to: "/history", label: "nav.history" },
+  { to: "/stats", label: "nav.stats" },
+  { to: "/feeds", label: "nav.feeds" },
 ];
 
 export default function Layout() {
+  const { t } = useI18n();
   return (
     <div className="app">
       <header className="app-header">
-        <Link to="/" className="brand" aria-label="PhishNet Dashboard home">
+        <Link to="/" className="brand" aria-label={t("app.home")}>
           <svg className="brand-mark" viewBox="0 0 64 64" aria-hidden="true">
             <g fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
               <rect x="8" y="12" width="48" height="32" rx="5" />
@@ -22,13 +24,13 @@ export default function Layout() {
             </g>
           </svg>
           <span>
-            Phish<span className="brand-accent">Net</span> <span className="brand-suffix">Dashboard</span>
+            Phish<span className="brand-accent">Net</span> <span className="brand-suffix">{t("app.brandSuffix")}</span>
           </span>
         </Link>
-        <nav className="app-nav" aria-label="Main">
+        <nav className="app-nav" aria-label={t("app.mainNav")}>
           {NAV_ITEMS.map((item) => (
             <NavLink key={item.to} to={item.to} end={item.end}>
-              {item.label}
+              {t(item.label)}
             </NavLink>
           ))}
         </nav>

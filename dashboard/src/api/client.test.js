@@ -224,7 +224,7 @@ describe("API key", () => {
       vi.unstubAllGlobals();
     }
     expect(fetchImpl.mock.calls[0][0]).toBe("/api/auth/check");
-    expect(fetchImpl.mock.calls[0][1].headers).toEqual({ "X-API-Key": "stored-key-123" });
+    expect(fetchImpl.mock.calls[0][1].headers).toEqual({ "Accept-Language": "en", "X-API-Key": "stored-key-123" });
   });
 
   it("turns 401 into an auth error and calls onUnauthorized", async () => {

@@ -1,20 +1,17 @@
+import { useI18n } from "../i18n/index.js";
 import "./ScanResultCard.css";
 
-/** Signal ids raised when a URL or its domain is listed in a threat intelligence feed. */
+/** Signal ids raised when a URL or its domain is listed in a threat intelligence feed, and their label keys. */
 export const FEED_SIGNAL_IDS = {
-  knownPhishingUrl: "Listed URL",
-  knownPhishingDomain: "Listed domain",
+  knownPhishingUrl: "result.feed.knownPhishingUrl",
+  knownPhishingDomain: "result.feed.knownPhishingDomain",
 };
 
-const LEVEL_LABELS = {
-  LOW: "Low risk",
-  MEDIUM: "Medium risk",
-  HIGH: "High risk",
-};
+const LEVELS = ["LOW", "MEDIUM", "HIGH"];
 
 /** CSS modifier for a risk level: "risk-low", "risk-medium", "risk-high", or "risk-unknown". */
 export function riskClass(level) {
-  return LEVEL_LABELS[level] ? `risk-${level.toLowerCase()}` : "risk-unknown";
+  return LEVELS.includes(level) ? `risk-${level.toLowerCase()}` : "risk-unknown";
 }
 
 /**
@@ -31,23 +28,28 @@ export function mlConfidencePercent(result) {
   return Math.round(Math.min(100, Math.max(0, percent)));
 }
 
-/** One scan result as returned by POST /api/scan/url or /api/scan/email. */
+/**
+ * One scan result as returned by POST /api/scan/url or /api/scan/email. Its
+ * recommendation and signal descriptions are shown as the API wrote them (in the
+ * language the client asked for).
+ */
 export default function ScanResultCard({ result }) {
+  const { t } = useI18n();
   const signals = result.signals ?? [];
   const feedMatches = signals.filter((signal) => FEED_SIGNAL_IDS[signal.id]);
   const ml = mlConfidencePercent(result);
   const score = Math.min(100, Math.max(0, Number(result.score) || 0));
 
   return (
-    <article className={`result-card ${riskClass(result.level)}`} aria-label="Scan result">
+    <article className={`result-card ${riskClass(result.level)}`} aria-label={t("result.label")}>
       <header className="result-header">
         <div className="result-level">
           <span className="risk-badge" data-testid="risk-badge">
-            {LEVEL_LABELS[result.level] ?? result.level}
+            {LEVELS.includes(result.level) ? t(`result.level.${result.level}`) : result.level}
           </span>
           <span className="result-type">{result.type}</span>
         </div>
-        <div className="result-score" aria-label={`Risk score ${score} out of 100`}>
+        <div className="result-score" aria-label={t("result.scoreLabel", { score })}>
           <span className="result-score-value">{score}</span>
           <span className="result-score-max">/100</span>
         </div>
@@ -63,10 +65,10 @@ export default function ScanResultCard({ result }) {
       <p className="result-recommendation">{result.recommendation}</p>
 
       {feedMatches.length > 0 ? (
-        <div className="feed-matches" aria-label="Threat feed matches">
+        <div className="feed-matches" aria-label={t("result.feedMatches")}>
           {feedMatches.map((signal, index) => (
             <span key={`${signal.id}-${index}`} className="feed-label" title={signal.description}>
-              Threat feed: {FEED_SIGNAL_IDS[signal.id]}
+              {t("result.feedMatch", { label: t(FEED_SIGNAL_IDS[signal.id]) })}
             </span>
           ))}
         </div>
@@ -76,20 +78,20 @@ export default function ScanResultCard({ result }) {
         {result.domainAge ? <DomainAge domainAge={result.domainAge} /> : null}
         {ml !== null ? (
           <section className="result-fact">
-            <h3>ML confidence</h3>
-            <p className="fact-value">{ml}% phishing</p>
+            <h3>{t("result.ml.title")}</h3>
+            <p className="fact-value">{t("result.ml.value", { percent: ml })}</p>
             <div className="ml-meter" role="presentation">
               <div className="ml-meter-fill" style={{ width: `${ml}%` }} />
             </div>
-            <p className="muted small">Experimental; an extra signal, not part of the score.</p>
+            <p className="muted small">{t("result.ml.note")}</p>
           </section>
         ) : null}
       </div>
 
       <section className="result-section">
-        <h3>Matched signals ({signals.length})</h3>
+        <h3>{t("result.signals.title", { count: signals.length })}</h3>
         {signals.length === 0 ? (
-          <p className="muted">No phishing indicators matched.</p>
+          <p className="muted">{t("result.signals.none")}</p>
         ) : (
           <ul className="signal-list">
             {signals.map((signal, index) => (
@@ -111,24 +113,25 @@ export default function ScanResultCard({ result }) {
 }
 
 function DomainAge({ domainAge }) {
+  const { t } = useI18n();
   let value;
   let detail = null;
   switch (domainAge.status) {
     case "KNOWN":
       value = domainAge.age;
-      detail = `${domainAge.domain}, registered ${domainAge.creationDate}`;
+      detail = t("result.domainAge.registered", { domain: domainAge.domain, date: domainAge.creationDate });
       break;
     case "UNKNOWN":
-      value = "Unknown";
+      value = t("result.domainAge.unknown");
       detail = [domainAge.domain, domainAge.reason].filter(Boolean).join(": ");
       break;
     default:
-      value = "Not checked";
-      detail = "WHOIS lookups are turned off on this server.";
+      value = t("result.domainAge.notChecked");
+      detail = t("result.domainAge.off");
   }
   return (
     <section className="result-fact">
-      <h3>Domain age</h3>
+      <h3>{t("result.domainAge.title")}</h3>
       <p className="fact-value">{value}</p>
       {detail ? <p className="muted small">{detail}</p> : null}
     </section>
@@ -136,28 +139,29 @@ function DomainAge({ domainAge }) {
 }
 
 function EmailDetails({ email }) {
+  const { t } = useI18n();
   const links = email.links ?? [];
   return (
     <section className="result-section">
-      <h3>Email</h3>
+      <h3>{t("result.email.title")}</h3>
       <dl className="details">
-        <dt>From</dt>
+        <dt>{t("result.email.from")}</dt>
         <dd>
           {email.displayName ? `${email.displayName} ` : ""}
-          {email.from ? `<${email.from}>` : "(none)"}
+          {email.from ? `<${email.from}>` : t("common.none")}
         </dd>
         {email.replyTo ? (
           <>
-            <dt>Reply-To</dt>
+            <dt>{t("result.email.replyTo")}</dt>
             <dd>{email.replyTo}</dd>
           </>
         ) : null}
-        <dt>Subject</dt>
-        <dd>{email.subject || "(none)"}</dd>
-        <dt>Links ({links.length})</dt>
+        <dt>{t("result.email.subject")}</dt>
+        <dd>{email.subject || t("common.none")}</dd>
+        <dt>{t("result.email.links", { count: links.length })}</dt>
         <dd>
           {links.length === 0 ? (
-            "None"
+            t("result.email.noLinks")
           ) : (
             <ul className="link-list">
               {links.map((link, index) => (

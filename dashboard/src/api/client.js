@@ -5,6 +5,11 @@
 // the API on its own origin. A different base URL can be set at build time
 // (VITE_API_BASE_URL) or at runtime from the dashboard's settings, much like the
 // browser extension's configurable API address.
+//
+// Every request asks for the dashboard's language (Accept-Language), so the API's
+// error messages and scan result text come back in it.
+
+import { getLanguage, translate } from "../i18n/index.js";
 
 /** localStorage key holding a base URL chosen in the dashboard's settings. */
 export const API_BASE_URL_KEY = "phishnet.apiBaseUrl";
@@ -46,13 +51,13 @@ export function normalizeBaseUrl(input) {
   try {
     url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `http://${text}`);
   } catch {
-    throw new Error("That doesn't look like a valid address.");
+    throw new Error(translate("client.invalidAddress"));
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error("The address must start with http:// or https://");
+    throw new Error(translate("client.protocol"));
   }
   if (url.username || url.password || url.search || url.hash) {
-    throw new Error("Use just the server address, without a login, query string, or #fragment.");
+    throw new Error(translate("client.addressExtras"));
   }
   return (url.origin + url.pathname).replace(/\/+$/, "");
 }
@@ -98,7 +103,7 @@ export function setConfiguredBaseUrl(input) {
 export function normalizeApiKey(input) {
   const key = (input ?? "").trim();
   if (key && !/^[\x21-\x7e]+$/.test(key)) {
-    throw new Error("The API key can't contain spaces or special characters - copy it exactly as printed.");
+    throw new Error(translate("client.invalidKey"));
   }
   return key;
 }
@@ -162,13 +167,16 @@ export function buildQuery(params) {
  * @param {object} [options]
  * @param {string} [options.baseUrl] API base URL; "" (the default) for same-origin relative paths
  * @param {string} [options.apiKey] sent as the X-API-Key header on every request when set
+ * @param {string} [options.language] sent as the Accept-Language header on every request when set
  * @param {() => void} [options.onUnauthorized] called when the server rejects the key (401)
  * @param {typeof fetch} [options.fetchImpl] fetch implementation (swapped out in tests)
  */
-export function createApiClient({ baseUrl = "", apiKey = "", onUnauthorized, fetchImpl } = {}) {
+export function createApiClient({ baseUrl = "", apiKey = "", language, onUnauthorized, fetchImpl } = {}) {
   const base = normalizeBaseUrl(baseUrl);
-  const where = base || "this server";
+  const where = base || translate("client.thisServer");
   const authHeaders = apiKey ? { [API_KEY_HEADER]: apiKey } : {};
+  // Set explicitly: otherwise the browser sends its own preference, which may not be the dashboard's.
+  const languageHeaders = language ? { "Accept-Language": language } : {};
 
   async function request(path, init, timeoutMs) {
     const doFetch = fetchImpl ?? globalThis.fetch.bind(globalThis);
@@ -179,16 +187,16 @@ export function createApiClient({ baseUrl = "", apiKey = "", onUnauthorized, fet
       try {
         response = await doFetch(base + path, {
           ...init,
-          headers: { ...init.headers, ...authHeaders },
+          headers: { ...init.headers, ...languageHeaders, ...authHeaders },
           signal: controller.signal,
           credentials: "same-origin",
           cache: "no-store",
         });
       } catch {
         if (controller.signal.aborted) {
-          throw new ApiError("timeout", `The PhishNet API at ${where} didn't answer within ${timeoutMs / 1000} seconds.`);
+          throw new ApiError("timeout", translate("client.timeout", { where, seconds: timeoutMs / 1000 }));
         }
-        throw new ApiError("unreachable", `Can't reach the PhishNet API at ${where}. Is "phishnet serve" running?`);
+        throw new ApiError("unreachable", translate("client.unreachable", { where }));
       }
 
       let body = null;
@@ -201,9 +209,7 @@ export function createApiClient({ baseUrl = "", apiKey = "", onUnauthorized, fet
         // The PhishNet API always explains its errors as {"error": "..."}.
         if (response.status === 401 && typeof body?.error === "string") {
           onUnauthorized?.();
-          throw new ApiError("auth", apiKey
-            ? "The PhishNet API rejected the API key."
-            : "This PhishNet API requires an API key.", 401);
+          throw new ApiError("auth", translate(apiKey ? "client.keyRejected" : "client.keyRequired"), 401);
         }
         if (response.status === 429 && typeof body?.error === "string") {
           const retryAfter = Number.parseInt(response.headers?.get?.("Retry-After") ?? "", 10);
@@ -212,11 +218,11 @@ export function createApiClient({ baseUrl = "", apiKey = "", onUnauthorized, fet
         if (typeof body?.error === "string") {
           throw new ApiError("http", body.error, response.status);
         }
-        throw new ApiError("invalid", `${where} answered with HTTP ${response.status}, not like a PhishNet API.`,
+        throw new ApiError("invalid", translate("client.httpNotApi", { where, status: response.status }),
           response.status);
       }
       if (body === null || typeof body !== "object") {
-        throw new ApiError("invalid", `${where} answered, but not like a PhishNet API.`, response.status);
+        throw new ApiError("invalid", translate("client.notApi", { where }), response.status);
       }
       return body;
     } finally {
@@ -238,7 +244,7 @@ export function createApiClient({ baseUrl = "", apiKey = "", onUnauthorized, fet
 
   function checkScanResult(result) {
     if (typeof result.score !== "number" || !RISK_LEVELS.includes(result.level) || !Array.isArray(result.signals)) {
-      throw new ApiError("invalid", `${where} answered, but not with a PhishNet scan result.`);
+      throw new ApiError("invalid", translate("client.notScanResult", { where }));
     }
     return result;
   }
@@ -282,7 +288,7 @@ export function createApiClient({ baseUrl = "", apiKey = "", onUnauthorized, fet
     async history(params = {}) {
       const body = await getJson("/api/history", params);
       if (!Array.isArray(body.scans)) {
-        throw new ApiError("invalid", `${where} answered, but not with a PhishNet scan history.`);
+        throw new ApiError("invalid", translate("client.notHistory", { where }));
       }
       return body;
     },
@@ -296,7 +302,7 @@ export function createApiClient({ baseUrl = "", apiKey = "", onUnauthorized, fet
     async historyStats(params = {}) {
       const body = await getJson("/api/history/stats", params);
       if (typeof body.total !== "number" || typeof body.byRiskLevel !== "object") {
-        throw new ApiError("invalid", `${where} answered, but not with PhishNet history stats.`);
+        throw new ApiError("invalid", translate("client.notStats", { where }));
       }
       return body;
     },
@@ -305,7 +311,7 @@ export function createApiClient({ baseUrl = "", apiKey = "", onUnauthorized, fet
     async feedsStatus() {
       const body = await getJson("/api/feeds/status");
       if (!Array.isArray(body.feeds)) {
-        throw new ApiError("invalid", `${where} answered, but not with PhishNet feed status.`);
+        throw new ApiError("invalid", translate("client.notFeeds", { where }));
       }
       return body;
     },
@@ -317,11 +323,12 @@ export function notifyUnauthorized() {
   globalThis.dispatchEvent?.(new Event(UNAUTHORIZED_EVENT));
 }
 
-/** A client for the base URL and API key currently configured. */
+/** A client for the base URL, API key, and language currently configured. */
 export function defaultClient() {
   return createApiClient({
     baseUrl: getConfiguredBaseUrl(),
     apiKey: getStoredApiKey(),
+    language: getLanguage(),
     onUnauthorized: notifyUnauthorized,
   });
 }
