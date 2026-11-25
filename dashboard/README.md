@@ -100,6 +100,24 @@ server accepts it. After that every request carries it in the `X-API-Key` header
 The key screen appears in development mode too: the Vite dev server forwards the
 header to the API.
 
+## Languages
+
+The dashboard is in English and Turkish (Türkçe). The language menu at the right of
+the header switches it at once; the choice is kept in this browser's local storage
+(`phishnet.language`), next to the API address and key. On a first visit the
+dashboard follows the browser's preferred languages and falls back to English.
+
+The dashboard's own text - menus, labels, buttons, its own error messages, dates and
+numbers - comes from `src/i18n/en.json` and `src/i18n/tr.json`; a key missing from
+one falls back to English. Text that comes from the API (scan results, the API's
+error messages) is shown as the server sends it: every request carries an
+`Accept-Language` header with the dashboard's language, so the server answers in the
+same one. A result that's already on screen stays in the language it was scanned in.
+
+To add a language, add `src/i18n/<code>.json` with the same keys and register it in
+`src/i18n/index.js` (`DICTIONARIES` and `LANGUAGE_NAMES`). Placeholders look like
+`{name}`, and keys with `.one`/`.other` variants are picked by the `count` value.
+
 ## Choosing the API address
 
 By default every request goes to the origin the dashboard was loaded from. To use a
@@ -127,9 +145,13 @@ The tests cover the API client (`src/api/client.test.js`: URL building, request
 shapes, error handling, the API key header and its storage, 401 and 429 handling),
 the key screen (`src/components/AuthGate.test.jsx`: when it appears, wrong and right
 keys, a key that stops working), the footer settings (`src/components/ApiSettings.test.jsx`),
-and the scan result card (`src/components/ScanResultCard.test.jsx`:
+the scan result card (`src/components/ScanResultCard.test.jsx`:
 risk level colors and labels, signals, domain age, feed matches, ML confidence, email
-details). The backend endpoints are tested by the Maven build (`DashboardApiTest`).
+details), the translations (`src/i18n/i18n.test.js`: both files have the same keys and
+placeholders, fallbacks, plurals, and how the language is detected and remembered),
+and the language switcher (`src/components/LanguageSwitcher.test.jsx`: switching swaps
+the page's text, the choice survives a reload, and the API is asked for the chosen
+language). The backend endpoints are tested by the Maven build (`DashboardApiTest`).
 
 ## Layout
 
@@ -142,8 +164,9 @@ dashboard/
     ├── main.jsx, App.jsx    bootstrapping and routes
     ├── index.css            shared dark theme (colors from assets/banner.svg)
     ├── format.js            date, number, and duration formatting
+    ├── i18n/                index.js (useI18n, language detection and storage), en.json, tr.json
     ├── api/client.js        fetch-based API client
-    ├── components/          Layout, AuthGate and ApiKeySetup (API key screen), ScanResultCard, RiskBadge, Pagination, ApiSettings
+    ├── components/          Layout, LanguageSwitcher, AuthGate and ApiKeySetup (API key screen), ScanResultCard, RiskBadge, Pagination, ApiSettings
     ├── pages/               ScanPage, HistoryPage, StatsPage, FeedsPage, NotFoundPage
     └── test/setup.js        Vitest setup
 ```

@@ -40,6 +40,10 @@ locally and refreshed hourly; a listed URL is flagged as a high-confidence
 signal on top of everything else. See
 [Threat Intelligence Feeds](#threat-intelligence-feeds).
 
+The CLI, the REST API, the web dashboard, and the browser extension are available
+in English and Turkish: `--lang tr`, an `Accept-Language: tr` header, or a language
+menu. See [Languages](#languages).
+
 ## Contents
 
 - [What it detects](#what-it-detects)
@@ -55,6 +59,7 @@ signal on top of everything else. See
 - [Browser extension](#browser-extension)
 - [Real-Time Email Monitoring](#real-time-email-monitoring)
 - [Parallel & Distributed Scanning](#parallel--distributed-scanning)
+- [Languages](#languages)
 - [Docker](#docker)
 - [Configuration](#configuration)
 - [Testing](#testing)
@@ -231,16 +236,18 @@ This produces a runnable, dependency-bundled jar at `target/phishnet.jar`.
 ## Usage
 
 The CLI is built on [picocli](https://picocli.info), which generates `--help`
-and `--version` output directly from the `@Command`/`@Option` annotations on
-[`Main`](src/main/java/com/phishnet/cli/Main.java) - so this is always exactly
-what you get by running it yourself:
+and `--version` output from the `@Command`/`@Option` annotations on
+[`Main`](src/main/java/com/phishnet/cli/Main.java) and the help text in
+[`messages.properties`](src/main/resources/i18n/messages.properties) - so this is
+always exactly what you get by running it yourself (in English; `--lang tr` shows it
+in Turkish, see [Languages](#languages)):
 
 ```
 $ java -jar target/phishnet.jar --help
 
 Usage:
-phishnet [-hV] [--config=<path>] (--url=<url> | --email=<file.eml> |
-         --batch=<file>) [[--json] [--no-color]] [-v | -q]
+phishnet [-hV] [--config=<path>] [--lang=<lang>] (--url=<url> | --email=<file.
+         eml> | --batch=<file>) [[--json] [--no-color]] [-v | -q]
          [[--history-file=<path>] [--no-history] [--history-db=<path>]
          [--no-history-db]] [[--html-report=<path>]] [[--no-whois]
          [--no-threat-feeds]] [[--threads=<n>]] [[--no-ml] [--model=<path>]]
@@ -252,6 +259,8 @@ Low/Medium/High label and a plain-language recommendation.
 Options:
       --config=<path>        Use a custom YAML config instead of the bundled
                                default
+      --lang=<lang>          Output language: en or tr (default: the system
+                               language if supported, else English)
   -h, --help                 Show this help message and exit.
   -V, --version              Print version information and exit.
 
@@ -366,6 +375,9 @@ java -jar target/phishnet.jar --url "https://example.com" --json
 
 # Force plain output even on a color-capable terminal
 java -jar target/phishnet.jar --url "https://example.com" --no-color
+
+# Help and results in Turkish (default: the system language, else English; see Languages)
+java -jar target/phishnet.jar --url "https://example.com" --lang tr
 
 # Use a custom config instead of the bundled defaults
 java -jar target/phishnet.jar --url "https://example.com" --config my-config.yaml
@@ -1504,7 +1516,8 @@ cache only and never starts a download (`phishnet feeds update` does that).
 
 Every error response is JSON of the form `{"error": "message"}` - internal
 details and stack traces are only ever written to the server's own log
-(stderr), never sent to the client.
+(stderr), never sent to the client. The message is in the language the request's
+`Accept-Language` header asks for (English by default) - see [Languages](#languages).
 
 | Status | When |
 | --- | --- |
@@ -1583,6 +1596,10 @@ The history, stats, and feed endpoints are read-only and run the same queries as
 `phishnet history` and `phishnet feeds status`, so the dashboard and the CLI always
 agree.
 
+The dashboard is in English or Turkish: the language menu in the header switches it,
+and it asks the API for scan results and errors in the same language (see
+[Languages](#languages)).
+
 ### Running it
 
 Build the dashboard once (Node.js 18.18+), then start the server from the repository root:
@@ -1636,6 +1653,8 @@ the LOW/MEDIUM/HIGH level (green/yellow/red), the score, and the top signals.
 It only checks a page when you click the icon - nothing runs in the
 background - and the API address (default `http://localhost:8080`, which also
 fits the Docker image run with `-p 8080:8080`) is set on its options page.
+Its popup and settings page are in English or Turkish, following the browser's
+language unless another one is picked in its settings.
 
 It's standalone HTML/CSS/JavaScript, not part of the Maven build or the
 Docker image: load the folder unpacked into your browser. See
@@ -1949,6 +1968,111 @@ docker run -d --name phishnet-worker-1 --network phishnet -v phishnet-history:/h
   ghcr.io/deipedra34/phishnet-detector queue worker --redis-host phishnet-redis --retry
 ```
 
+## Languages
+
+PhishNet speaks **English** and **Turkish** (Türkçe) everywhere people read its
+output: the CLI and its `--help`, the REST API's messages, the web dashboard, and the
+browser extension. English is the default, and the fallback for anything without a
+translation.
+
+| Part | How the language is picked |
+| --- | --- |
+| CLI (every command, including `--help`) | `--lang en` or `--lang tr`; without it, the system language if it's one of these, otherwise English |
+| REST API | Each request's `Accept-Language` header; English without one |
+| Web dashboard | The language menu in the header; on a first visit, the browser's language |
+| Browser extension | **Language** on its settings page: automatic (the browser's language), English, or Turkish |
+
+### Command line
+
+```bash
+java -jar target/phishnet.jar --lang tr --url "http://192.168.1.10/login" --no-whois
+```
+
+```
+Hedef: http://192.168.1.10/login
+Risk Puanı: 25/100 (DÜŞÜK)
+Sinyaller:
+  ⚠ [ipAddressHost] URL, alan adı yerine doğrudan bir IP adresi kullanıyor
+Öneri: Güçlü bir oltalama belirtisi bulunmadı. Yine de kimlik bilgisi veya ödeme isteyen her şeyi, gereğini yapmadan önce doğrulayın.
+```
+
+- `--lang` is accepted by every command, anywhere on the command line:
+  `phishnet --lang tr serve`, `phishnet history list --lang tr`. `--lang=tr`,
+  `tr-TR`, and `TR` work too.
+- Without `--lang`, the CLI follows the system language (Java's default locale), so
+  on a Turkish system it answers in Turkish. `--lang en` forces English; so does
+  starting Java with `-Duser.language=en`.
+- A language that isn't supported (`--lang de`) prints a warning on stderr and
+  continues in English; the exit code is unaffected.
+- What stays the same in every language, so scripts keep working: `--quiet` lines
+  (`LOW 25 http://...`), JSON field names and values such as `LOW`/`MEDIUM`/`HIGH`
+  and signal ids, the scan-history CSV, and option names and values. With `--json`,
+  only the `recommendation` and signal `description` text follow `--lang`.
+- Signal descriptions are stored in the scan history database in English, so
+  `phishnet history list --verbose` shows them as recorded. Picocli's own parse errors
+  (for example "Unknown option") are English in either language, and error details
+  that come from the system or a server (such as "Connection refused") are shown as
+  received.
+
+### REST API
+
+```bash
+curl -s -X POST http://localhost:8080/api/scan/url -H "X-API-Key: $API_KEY" \
+  -H "Accept-Language: tr" -H "Content-Type: application/json" -d '{"url": "http://192.168.1.10/login"}'
+```
+
+```json
+{
+  "target": "http://192.168.1.10/login",
+  "type": "URL",
+  "score": 25,
+  "level": "LOW",
+  "recommendation": "Güçlü bir oltalama belirtisi bulunmadı. Yine de kimlik bilgisi veya ödeme isteyen her şeyi, gereğini yapmadan önce doğrulayın.",
+  "signals": [
+    {
+      "id": "ipAddressHost",
+      "category": "URL",
+      "description": "URL, alan adı yerine doğrudan bir IP adresi kullanıyor",
+      "evidence": "192.168.1.10"
+    }
+  ],
+  "domainAge": { "status": "SKIPPED" }
+}
+```
+
+The most preferred supported language in `Accept-Language` wins (q-values are
+honored, so `de-DE, tr;q=0.8, en;q=0.5` gives Turkish); a missing, malformed, or
+unsupported header gives English, exactly as before. Every `/api` response carries
+a `Content-Language` header naming the language used. Translated: `error` messages,
+the `recommendation`, signal `description`s, and `domainAge.age`/`domainAge.reason`.
+The JSON structure, field names, levels, types, ids, statuses, and `evidence` are
+never translated, and neither are the history endpoints' stored `reasons` or the
+feed status `detail`/`lastError` text. The server's own console output follows
+`phishnet serve`'s `--lang`.
+
+### Web dashboard and browser extension
+
+The dashboard's header has a language menu (English / Türkçe). The choice is
+remembered in the browser's local storage, next to the API address and key, and the
+dashboard asks the API for the same language, so scan results and error messages
+match. The extension's popup and settings page follow the browser's language unless
+another one is picked on its settings page. See
+[dashboard/README.md](dashboard/README.md#languages) and
+[browser-extension/README.md](browser-extension/README.md#languages).
+
+### Adding a language
+
+1. Copy `src/main/resources/i18n/messages_tr.properties` to
+   `messages_<code>.properties` and translate it (keep every key and placeholder,
+   and the same number of `usage.footer.N` lines per command), then add the code to
+   `Messages.LANGUAGES`.
+2. Add `dashboard/src/i18n/<code>.json` and register it in `dashboard/src/i18n/index.js`.
+3. Add `browser-extension/_locales/<code>/messages.json`, then list the language in
+   `browser-extension/lib/i18n.js` and in the picker in `options.html`.
+
+`MessagesTest` and the dashboard's `i18n.test.js` fail if a translation file is
+missing a key or uses different placeholders than the English one.
+
 ## Docker
 
 A prebuilt multi-arch image (`linux/amd64`, `linux/arm64`) is published to
@@ -2191,6 +2315,15 @@ pagination (`limit`/`offset`/`total`), target/risk/type filtering and validation
 `/api/feeds/status` for fresh, stale, missing, not-configured, and offline feeds,
 and the static dashboard serving (client-side routes, missing assets, and API
 errors staying JSON).
+Translations: `MessagesTest` checks that the English and Turkish bundles have the
+same keys and placeholders and that an unsupported language never falls back to the
+system's; `LanguageOptionTest` runs the CLI with `--lang en`, `--lang tr`, an
+unsupported value, and different system locales, covering help, subcommands, usage
+errors, and the output that must stay English (`--quiet`, JSON keys); and
+`ApiLanguageTest` checks `Accept-Language` parsing (q-values, malformed headers) and
+translated scan results and errors over HTTP. Because the CLI follows the system
+language when `--lang` isn't given, the test JVM runs with an English default locale
+(the surefire `argLine` in `pom.xml`).
 `HistoryDatabaseTest` covers the SQLite scan history (schema creation, inserts,
 listing, target/risk/type/date filters, LIKE-wildcard and SQL-injection-style
 search text, stats aggregation, write failures) against a fresh database file
@@ -2259,7 +2392,7 @@ or empty sections (brands, TLDs, weights).
 `mvn test` runs [JaCoCo](https://www.jacoco.org/jacoco/) automatically and
 generates an HTML report at `target/site/jacoco/index.html` - open that file
 in a browser for a line-by-line, package-by-package breakdown. The suite
-(744 tests as of this writing) maintains roughly **90% line / 80% branch**
+(777 tests as of this writing) maintains roughly **90% line / 80% branch**
 coverage overall; the biggest remaining gaps are `SslChecker`'s real-socket
 TLS handshake path and `SocketWhoisClient`'s port-43 I/O, which by design
 aren't exercised without a live network connection (the certificate-decision
@@ -2274,8 +2407,8 @@ them explicitly with:
 mvn test -Dgroups=network -DexcludedGroups=none
 ```
 
-The web dashboard has its own small Vitest suite (the API client and the scan
-result card), run separately from Maven:
+The web dashboard has its own small Vitest suite (the API client, the scan result
+card, the translations, and the language switcher), run separately from Maven:
 
 ```bash
 cd dashboard && npm install && npm test
@@ -2288,15 +2421,17 @@ src/main/java/com/phishnet/
   analyzer/   UrlAnalyzer, SslChecker, EmailAnalyzer, DomainAgeChecker, WhoisClient, SocketWhoisClient
   model/      Signal, RiskScore, UrlComponents, PhishNetConfig, ...
   scoring/    RiskScorer
-  cli/        Main (picocli @Command), ServeCommand, HistoryCommand, ModelCommand, MonitorCommand, QueueCommand, FeedsCommand, ReportFormatter, Reporter, HistoryReporter, MonitorReporter, QueueWorkerReporter, OutputLevel, HistoryWriter, HtmlReportWriter
+  cli/        Main (picocli @Command), LanguageOption (--lang), ServeCommand, HistoryCommand, ModelCommand, MonitorCommand, QueueCommand, FeedsCommand, ReportFormatter, Reporter, HistoryReporter, MonitorReporter, QueueWorkerReporter, OutputLevel, HistoryWriter, HtmlReportWriter
   history/    HistoryDatabase (SQLite scan history), HistoryEntry, HistoryFilter, HistoryStats
   batch/      ParallelScanner (thread pool + bounded job queue), UrlScanner (shared URL scan pipeline)
   queue/      QueueWorker, JobQueue, RedisJobQueue, RedisSettings, ScanJob (Redis-based distributed mode)
   ml/         FeatureVector, FeatureExtractor, LogisticRegression, TrainingData, MlModel, MlScorer, MlPrediction (experimental ML layer)
   feeds/      ThreatFeedService, ThreatFeedIndex, FeedCache, FeedParser, FeedUrls, HttpFeedFetcher, ThreatFeedSettings (threat intelligence feeds)
   mail/       MailMonitorService, MailSource, ImapMailSource, Pop3MailSource, MessageConverter, MonitorActions, Backoff, MailServerSettings (mailbox monitoring)
-  api/        ApiServer (Javalin routes, validation, JSON errors, API key check, dashboard static files), ScanService (analyzer/scorer wrapper), HistoryApi and FeedsApi (read-only dashboard endpoints), ApiKeyStore (API key file), RateLimiter (per-client token bucket)
+  api/        ApiServer (Javalin routes, validation, JSON errors, API key check, dashboard static files), ApiLanguage (Accept-Language), ScanService (analyzer/scorer wrapper), HistoryApi and FeedsApi (read-only dashboard endpoints), ApiKeyStore (API key file), RateLimiter (per-client token bucket)
+  i18n/       Messages (resource bundle lookup, --lang and Accept-Language languages), Text, Localized
   util/       LevenshteinDistance, HomoglyphUtil, ConfigLoader, AnsiColor, ColorSupport
+src/main/resources/i18n/     messages.properties (English: help, output, scan results, API errors), messages_tr.properties (Turkish)
 src/main/resources/phishnet-config.yaml
 src/main/resources/training-data.csv  (bundled example dataset for the ML layer)
 src/main/resources/simplelogger.properties  (log levels for serve mode)
@@ -2320,11 +2455,15 @@ there's no hand-rolled parsing to touch. To add a new flag:
 1. Add a `@Option`-annotated field (or a `@Parameters` field for a positional
    argument) to `Main`, or to one of its nested option-holder classes
    (`ModeOptions`, `OutputOptions`, `VerbosityOptions`) if it belongs with an
-   existing group. Give it a clear `description` - that text becomes the
-   `--help` line, and requirement 4/6 in this repo's own history is "the help
-   output should stay well-organized," so group new flags with the section
-   they logically belong to (input/output/misc) rather than leaving them to
-   fall into the default `Options:` bucket.
+   existing group, and group new flags with the section they logically belong
+   to (input/output/misc) rather than leaving them to fall into the default
+   `Options:` bucket. Its `--help` line isn't in the annotation: add it to
+   [`messages.properties`](src/main/resources/i18n/messages.properties) under
+   `phishnet.<option name without dashes>` (`phishnet\ serve.<name>` for
+   `phishnet serve`, and so on), with the Turkish text under the same key in
+   `messages_tr.properties`.
+   Anything else the CLI prints goes through `Messages.text(key, args...)` with
+   keys in both files, too.
 2. If the new flag must not be combined with an existing one (like
    `--verbose`/`--quiet`), use an `@ArgGroup` with `exclusive = true` rather
    than a manual `if` check - see the existing groups for the pattern, and

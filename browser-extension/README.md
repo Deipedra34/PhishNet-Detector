@@ -37,7 +37,8 @@ and say so.
 
 The only data the extension sends anywhere is the address of the page you
 clicked it on, and only to the API address in its settings - your own server.
-It stores just that one setting (in the browser's extension storage). Note that
+It stores just its settings - the API address, the API key, and the language - in
+the browser's extension storage. Note that
 the PhishNet server records each scan in its
 [scan history database](../README.md#scan-history) like any other API scan;
 start it with `--no-history-db` if you don't want that.
@@ -120,6 +121,7 @@ Right-click the toolbar icon → **Options** (Firefox: **Manage Extension** →
   `GET /api/auth/check` to see it accepts the key. A server older than 2.9.0
   has no API keys, and the test says so.
 - **Reset to default** goes back to `http://localhost:8080` (the key is kept).
+- **Language** - see [Languages](#languages) below. Takes effect as soon as you pick it.
 
 **Upgrading from an older PhishNet:** after the server is upgraded to 2.9.0
 or newer, scans fail with "PhishNet API requires an API key" until you paste
@@ -129,12 +131,30 @@ When you save an address on a host other than `localhost` / `127.0.0.1`, the
 browser asks whether PhishNet may access that host. Allowing it is
 recommended but not required - see the next section.
 
+## Languages
+
+The popup and the settings page are in English and Turkish (Türkçe). By default
+(**Automatic**) they follow the browser's language, falling back to English; the
+**Language** setting picks one regardless of the browser. The extension's name,
+description, and toolbar tooltip always follow the browser's language - browsers
+read those from the manifest themselves.
+
+The text lives in `_locales/en/messages.json` and `_locales/tr/messages.json` (the
+standard extension format). Messages from the API - scan results and its error
+messages - come in the same language: every request sends an `Accept-Language`
+header with the extension's language, and `phishnet serve` 2.10.0 and newer answer
+in it (older servers answer in English).
+
+To add a language, add `_locales/<code>/messages.json` with the same keys and
+placeholders, then list the code in `lib/i18n.js` (`LANGUAGES` and
+`LANGUAGE_NAMES`) and add it to the picker in `options.html`.
+
 ## Permissions and cross-origin requests
 
 | Permission | Why |
 | --- | --- |
 | `activeTab` | Read the current tab's address, only when you click the icon |
-| `storage` | Remember the API address and API key |
+| `storage` | Remember the API address, API key, and language |
 | host access to `localhost` and `127.0.0.1` | Call a local `phishnet serve` (any port) |
 | optional host access (`http://*/*`, `https://*/*`) | Asked for one host at a time, only when you save an API address on another host |
 
@@ -186,9 +206,11 @@ One manifest works in both. The browser-specific bits:
 
 ```
 manifest.json      Manifest V3, shared by Chrome and Firefox
+_locales/          en and tr messages.json: all the extension's text
 popup.html/.css/.js   toolbar popup: reads the tab URL, calls the API, shows the result
-options.html/.css/.js settings page: API address, test connection, reset
+options.html/.css/.js settings page: API address, API key, language, test connection, reset
 lib/api.js         shared: browser/chrome shim, settings storage, API calls and error messages
+lib/i18n.js        shared: picks the language and translates the pages
 styles.css         shared dark theme
 icons/             icon.svg (source) and its 16/32/48/128 px PNG renders
 ```
