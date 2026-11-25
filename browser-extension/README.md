@@ -142,7 +142,7 @@ read those from the manifest themselves.
 The text lives in `_locales/en/messages.json` and `_locales/tr/messages.json` (the
 standard extension format). Messages from the API - scan results and its error
 messages - come in the same language: every request sends an `Accept-Language`
-header with the extension's language, and `phishnet serve` 2.10.0 and newer answer
+header with the extension's language, and `phishnet serve` 3.0.0 and newer answer
 in it (older servers answer in English).
 
 To add a language, add `_locales/<code>/messages.json` with the same keys and

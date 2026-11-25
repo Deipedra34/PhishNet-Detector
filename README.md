@@ -337,7 +337,7 @@ See the project README for the full option reference and sample output.
 
 ```
 $ java -jar target/phishnet.jar --version
-phishnet 2.10.0
+phishnet 3.0.0
 ```
 
 `--version` always reflects the version actually built (Maven filters it into

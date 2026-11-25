@@ -1,7 +1,7 @@
 {
   "name": "phishnet-dashboard",
   "private": true,
-  "version": "2.10.0",
+  "version": "3.0.0",
   "description": "Web dashboard for the PhishNet Detector REST API",
   "type": "module",
   "engines": {
