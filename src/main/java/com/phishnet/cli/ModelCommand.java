@@ -26,24 +26,11 @@ import java.util.concurrent.Callable;
  */
 @Command(
         name = "phishnet " + Main.MODEL_COMMAND,
+        resourceBundle = Main.MESSAGES_BUNDLE,
         mixinStandardHelpOptions = true,
         versionProvider = Main.VersionProvider.class,
         sortOptions = false,
-        synopsisSubcommandLabel = "COMMAND",
-        description = "Train or inspect the experimental ML model that adds a phishing probability "
-                + "(\"ML Confidence\") next to the rule-based risk score. Scans train it from the bundled "
-                + "dataset automatically on first use; --no-ml turns it off for a scan.",
-        synopsisHeading = "%nUsage:%n",
-        descriptionHeading = "%n",
-        optionListHeading = "%nOptions:%n",
-        commandListHeading = "%nCommands:%n",
-        footerHeading = "%nExamples:%n",
-        footer = {
-                "  phishnet model train",
-                "  phishnet model train --data my-training-data.csv",
-                "  phishnet model info"
-        }
-)
+        descriptionHeading = "%n")
 final class ModelCommand implements Callable<Integer> {
 
     @Spec
@@ -65,8 +52,7 @@ final class ModelCommand implements Callable<Integer> {
     /** The {@code --model} option shared by both subcommands. */
     abstract static class ModelFileCommand implements Callable<Integer> {
 
-        @Option(names = "--model", paramLabel = "<path>",
-                description = "Model file (default: ~/.phishnet/phishnet-model.json)")
+        @Option(names = "--model", paramLabel = "<path>")
         String modelPath;
 
         final PrintStream out;
@@ -95,17 +81,10 @@ final class ModelCommand implements Callable<Integer> {
             mixinStandardHelpOptions = true,
             versionProvider = Main.VersionProvider.class,
             sortOptions = false,
-            description = "Train the model from the bundled dataset (or a CSV file of your own) and save it, "
-                    + "replacing any existing model file.",
-            synopsisHeading = "%nUsage:%n",
-            descriptionHeading = "%n",
-            optionListHeading = "%nOptions:%n"
-    )
+            descriptionHeading = "%n")
     static final class TrainCommand extends ModelFileCommand {
 
-        @Option(names = "--data", paramLabel = "<path>",
-                description = "Labeled training CSV to use instead of the bundled dataset "
-                        + "(same columns as the bundled training-data.csv; label 1 = phishing, 0 = legitimate)")
+        @Option(names = "--data", paramLabel = "<path>")
         String dataPath;
 
         TrainCommand(PrintStream out, PrintStream err) {
@@ -144,11 +123,7 @@ final class ModelCommand implements Callable<Integer> {
             mixinStandardHelpOptions = true,
             versionProvider = Main.VersionProvider.class,
             sortOptions = false,
-            description = "Show the current model: when and on what it was trained, and its learned weights.",
-            synopsisHeading = "%nUsage:%n",
-            descriptionHeading = "%n",
-            optionListHeading = "%nOptions:%n"
-    )
+            descriptionHeading = "%n")
     static final class InfoCommand extends ModelFileCommand {
 
         InfoCommand(PrintStream out, PrintStream err) {

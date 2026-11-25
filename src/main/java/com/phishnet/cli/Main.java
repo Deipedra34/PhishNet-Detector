@@ -11,6 +11,7 @@ import com.phishnet.feeds.ThreatFeedIndex;
 import com.phishnet.feeds.ThreatFeedService;
 import com.phishnet.feeds.ThreatFeedSettings;
 import com.phishnet.history.HistoryDatabase;
+import com.phishnet.i18n.Messages;
 import com.phishnet.ml.MlPrediction;
 import com.phishnet.ml.MlScorer;
 import com.phishnet.model.DomainAgeResult;
@@ -53,30 +54,11 @@ import java.util.function.Function;
  */
 @Command(
         name = "phishnet",
+        resourceBundle = Main.MESSAGES_BUNDLE,
         mixinStandardHelpOptions = true,
         versionProvider = Main.VersionProvider.class,
         sortOptions = false,
-        description = "Analyzes URLs, TLS certificates, and .eml email files for phishing indicators, "
-                + "and combines whatever it finds into a single 0-100 risk score with a Low/Medium/High "
-                + "label and a plain-language recommendation.",
-        synopsisHeading = "%nUsage:%n",
-        descriptionHeading = "%n",
-        optionListHeading = "%nOptions:%n",
-        footerHeading = "%nExamples:%n",
-        footer = {
-                "  phishnet --url https://example.com",
-                "  phishnet --email suspicious.eml --verbose",
-                "  phishnet --batch urls.txt --json",
-                "  phishnet serve --port 8080   (REST API mode; see: phishnet serve --help)",
-                "  phishnet history list        (past scans; see: phishnet history --help)",
-                "  phishnet model info          (ML model details; see: phishnet model --help)",
-                "  phishnet monitor --help      (watch a mailbox for phishing as mail arrives)",
-                "  phishnet queue --help        (distributed scanning with Redis workers)",
-                "  phishnet feeds status        (threat intelligence feeds; see: phishnet feeds --help)",
-                "",
-                "See the project README for the full option reference and sample output."
-        }
-)
+        descriptionHeading = "%n")
 public final class Main implements Callable<Integer> {
 
     // --- input options ------------------------------------------------------
@@ -89,39 +71,33 @@ public final class Main implements Callable<Integer> {
     // ungrouped option instead of sharing this group.
     // Not final - picocli sets this field reflectively when binding parsed values,
     // and a final field there triggers a JVM "restricted method" warning on every run.
-    @ArgGroup(exclusive = true, multiplicity = "1", heading = "%nInput options:%n")
+    @ArgGroup(exclusive = true, multiplicity = "1", headingKey = "phishnet.group.url")
     private ModeOptions mode = new ModeOptions();
 
     private static final class ModeOptions {
-        @Option(names = "--url", paramLabel = "<url>",
-                description = "Analyze a single URL")
+        @Option(names = "--url", paramLabel = "<url>")
         private String url;
 
-        @Option(names = "--email", paramLabel = "<file.eml>",
-                description = "Analyze a single .eml email file")
+        @Option(names = "--email", paramLabel = "<file.eml>")
         private String emailPath;
 
-        @Option(names = "--batch", paramLabel = "<file>",
-                description = "Analyze a newline-separated file of URLs ('#' comments allowed)")
+        @Option(names = "--batch", paramLabel = "<file>")
         private String batchPath;
     }
 
-    @Option(names = "--config", paramLabel = "<path>",
-            description = "Use a custom YAML config instead of the bundled default")
+    @Option(names = "--config", paramLabel = "<path>")
     private String configPath;
 
     // --- output options ------------------------------------------------------
 
-    @ArgGroup(exclusive = false, multiplicity = "0..1", heading = "%nOutput options:%n")
+    @ArgGroup(exclusive = false, multiplicity = "0..1", headingKey = "phishnet.group.json")
     private OutputOptions output = new OutputOptions();
 
     private static final class OutputOptions {
-        @Option(names = "--json",
-                description = "Output machine-readable JSON instead of a human-readable report")
+        @Option(names = "--json")
         private boolean json;
 
-        @Option(names = "--no-color",
-                description = "Disable ANSI colors even if the terminal supports them")
+        @Option(names = "--no-color")
         private boolean noColor;
     }
 
@@ -132,13 +108,10 @@ public final class Main implements Callable<Integer> {
     private VerbosityOptions verbosity = new VerbosityOptions();
 
     private static final class VerbosityOptions {
-        @Option(names = {"--verbose", "-v"},
-                description = "Show each analyzer's internal reasoning, not just the summary")
+        @Option(names = {"--verbose", "-v"})
         private boolean verbose;
 
-        @Option(names = {"--quiet", "-q"},
-                description = "Print one machine-parsable line only (LEVEL SCORE TARGET); "
-                        + "exit code reflects risk")
+        @Option(names = {"--quiet", "-q"})
         private boolean quiet;
     }
 
@@ -149,25 +122,20 @@ public final class Main implements Callable<Integer> {
     // non-exclusive group only so the flags get their own labeled --help section.
     // The CSV file and the SQLite database are independent: each has its own
     // location and "off" switch.
-    @ArgGroup(exclusive = false, multiplicity = "0..1", heading = "%nHistory options:%n")
+    @ArgGroup(exclusive = false, multiplicity = "0..1", headingKey = "phishnet.group.history-file")
     private HistoryOptions history = new HistoryOptions();
 
     private static final class HistoryOptions {
-        @Option(names = "--history-file", paramLabel = "<path>",
-                description = "Append scan results to this CSV file (default: ./phishnet-history.csv)")
+        @Option(names = "--history-file", paramLabel = "<path>")
         private String file;
 
-        @Option(names = "--no-history",
-                description = "Do not append this run's results to the scan history CSV")
+        @Option(names = "--no-history")
         private boolean disabled;
 
-        @Option(names = "--history-db", paramLabel = "<path>",
-                description = "Record scan results in this SQLite database "
-                        + "(default: ~/.phishnet/phishnet-history.db; query it with: phishnet history)")
+        @Option(names = "--history-db", paramLabel = "<path>")
         private String databaseFile;
 
-        @Option(names = "--no-history-db",
-                description = "Do not record this run's results in the scan history database")
+        @Option(names = "--no-history-db")
         private boolean databaseDisabled;
     }
 
@@ -176,59 +144,47 @@ public final class Main implements Callable<Integer> {
 
     // --- HTML report option --------------------------------------------------
 
-    @ArgGroup(exclusive = false, multiplicity = "0..1", heading = "%nReport options:%n")
+    @ArgGroup(exclusive = false, multiplicity = "0..1", headingKey = "phishnet.group.html-report")
     private ReportOptions report = new ReportOptions();
 
     private static final class ReportOptions {
-        @Option(names = "--html-report", paramLabel = "<path>",
-                description = "Write a self-contained, styled HTML report of this run's results to <path> "
-                        + "(for --batch, written once at the end covering the whole run)")
+        @Option(names = "--html-report", paramLabel = "<path>")
         private String htmlReportPath;
     }
 
     // --- network options -----------------------------------------------------
 
-    @ArgGroup(exclusive = false, multiplicity = "0..1", heading = "%nNetwork options:%n")
+    @ArgGroup(exclusive = false, multiplicity = "0..1", headingKey = "phishnet.group.no-whois")
     private NetworkOptions network = new NetworkOptions();
 
     private static final class NetworkOptions {
-        @Option(names = "--no-whois",
-                description = "Skip the live WHOIS domain-age lookup (for offline/fast scans or CI); "
-                        + "domain age is then left out of the score entirely")
+        @Option(names = "--no-whois")
         private boolean noWhois;
 
-        @Option(names = "--no-threat-feeds",
-                description = "Don't check the OpenPhish/PhishTank threat intelligence feeds (no feed "
-                        + "downloads, cached feeds unused); feed matches are then left out of the score")
+        @Option(names = "--no-threat-feeds")
         private boolean noThreatFeeds;
     }
 
     // --- batch options ---------------------------------------------------------
 
-    @ArgGroup(exclusive = false, multiplicity = "0..1", heading = "%nBatch options:%n")
+    @ArgGroup(exclusive = false, multiplicity = "0..1", headingKey = "phishnet.group.threads")
     private BatchOptions batch = new BatchOptions();
 
     private static final class BatchOptions {
-        @Option(names = "--threads", paramLabel = "<n>",
-                description = "Scan --batch URLs on this many threads in parallel (default: one per CPU core; "
-                        + "1 scans them one at a time). Output order is the same either way.")
+        @Option(names = "--threads", paramLabel = "<n>")
         private Integer threads;
     }
 
     // --- machine learning options ---------------------------------------------
 
-    @ArgGroup(exclusive = false, multiplicity = "0..1", heading = "%nMachine learning options (experimental):%n")
+    @ArgGroup(exclusive = false, multiplicity = "0..1", headingKey = "phishnet.group.no-ml")
     private MlOptions ml = new MlOptions();
 
     private static final class MlOptions {
-        @Option(names = "--no-ml",
-                description = "Skip the experimental ML phishing-probability signal entirely; "
-                        + "the rule-based risk score is unaffected")
+        @Option(names = "--no-ml")
         private boolean disabled;
 
-        @Option(names = "--model", paramLabel = "<path>",
-                description = "ML model file, trained from the bundled dataset on first use if missing "
-                        + "(default: ~/.phishnet/phishnet-model.json; see: phishnet model --help)")
+        @Option(names = "--model", paramLabel = "<path>")
         private String modelFile;
     }
 
@@ -322,6 +278,9 @@ public final class Main implements Callable<Integer> {
         return execute(new CommandLine(app), args, out, err);
     }
 
+    /** Resource bundle holding every command's help text (and the CLI's other user-facing text). */
+    static final String MESSAGES_BUNDLE = Messages.BUNDLE;
+
     /** First argument that switches from a one-off scan to running the REST API server. */
     static final String SERVE_COMMAND = "serve";
 
@@ -349,6 +308,8 @@ public final class Main implements Callable<Integer> {
     private static int execute(CommandLine cmd, String[] args, PrintStream out, PrintStream err) {
         cmd.setOut(new PrintWriter(out, true, StandardCharsets.UTF_8));
         cmd.setErr(new PrintWriter(err, true, StandardCharsets.UTF_8));
+        // Help text in the run's language (subcommands included); English for any key it lacks.
+        cmd.setResourceBundle(Messages.current().bundle());
 
         // Same --no-color / NO_COLOR / non-TTY rules as the risk-level colors (AnsiColor/ColorSupport),
         // applied here too so picocli's own help/version ANSI styling doesn't disagree with them.

@@ -35,24 +35,11 @@ import java.util.concurrent.Callable;
  */
 @Command(
         name = "phishnet " + Main.HISTORY_COMMAND,
+        resourceBundle = Main.MESSAGES_BUNDLE,
         mixinStandardHelpOptions = true,
         versionProvider = Main.VersionProvider.class,
         sortOptions = false,
-        synopsisSubcommandLabel = "COMMAND",
-        description = "Query the local scan history database. Every scan (CLI or REST API) is recorded "
-                + "there unless --no-history-db is given.",
-        synopsisHeading = "%nUsage:%n",
-        descriptionHeading = "%n",
-        optionListHeading = "%nOptions:%n",
-        commandListHeading = "%nCommands:%n",
-        footerHeading = "%nExamples:%n",
-        footer = {
-                "  phishnet history list --limit 50",
-                "  phishnet history search --target paypal",
-                "  phishnet history search --risk HIGH --since 2026-10-01",
-                "  phishnet history stats"
-        }
-)
+        descriptionHeading = "%n")
 final class HistoryCommand implements Callable<Integer> {
 
     @Spec
@@ -81,24 +68,20 @@ final class HistoryCommand implements Callable<Integer> {
         @Spec
         CommandSpec spec;
 
-        @Option(names = "--history-db", paramLabel = "<path>",
-                description = "History database to read (default: ~/.phishnet/phishnet-history.db)")
+        @Option(names = "--history-db", paramLabel = "<path>")
         String databasePath;
 
-        @Option(names = "--no-color",
-                description = "Disable ANSI colors even if the terminal supports them")
+        @Option(names = "--no-color")
         boolean noColor;
 
         @ArgGroup(exclusive = true, multiplicity = "0..1", heading = "%n")
         Verbosity verbosity = new Verbosity();
 
         static final class Verbosity {
-            @Option(names = {"--verbose", "-v"},
-                    description = "Also show each scan's domain, domain age, email subject, and signals")
+            @Option(names = {"--verbose", "-v"})
             boolean verbose;
 
-            @Option(names = {"--quiet", "-q"},
-                    description = "Print one machine-parsable line per scan (LEVEL SCORE TARGET)")
+            @Option(names = {"--quiet", "-q"})
             boolean quiet;
         }
 
@@ -161,15 +144,10 @@ final class HistoryCommand implements Callable<Integer> {
             mixinStandardHelpOptions = true,
             versionProvider = Main.VersionProvider.class,
             sortOptions = false,
-            description = "Show the most recent scans, newest first.",
-            synopsisHeading = "%nUsage:%n",
-            descriptionHeading = "%n",
-            optionListHeading = "%nOptions:%n"
-    )
+            descriptionHeading = "%n")
     static final class ListCommand extends QueryCommand {
 
-        @Option(names = "--limit", paramLabel = "<n>", defaultValue = "20",
-                description = "How many scans to show (default: ${DEFAULT-VALUE}; 0 shows all)")
+        @Option(names = "--limit", paramLabel = "<n>", defaultValue = "20")
         int limit;
 
         ListCommand(PrintStream out, PrintStream err, ZoneId zone) {
@@ -193,35 +171,25 @@ final class HistoryCommand implements Callable<Integer> {
             mixinStandardHelpOptions = true,
             versionProvider = Main.VersionProvider.class,
             sortOptions = false,
-            description = "Find past scans, newest first. Filters can be combined; all of them must match.",
-            synopsisHeading = "%nUsage:%n",
-            descriptionHeading = "%n",
-            optionListHeading = "%nOptions:%n"
-    )
+            descriptionHeading = "%n")
     static final class SearchCommand extends QueryCommand {
 
-        @Option(names = "--target", paramLabel = "<text>",
-                description = "Case-insensitive substring of the URL, domain, email file name, or email subject")
+        @Option(names = "--target", paramLabel = "<text>")
         String target;
 
-        @Option(names = "--risk", paramLabel = "<level>",
-                description = "Only scans with this risk level: ${COMPLETION-CANDIDATES}")
+        @Option(names = "--risk", paramLabel = "<level>")
         RiskLevel risk;
 
-        @Option(names = "--type", paramLabel = "<type>",
-                description = "Only scans of this type: ${COMPLETION-CANDIDATES}")
+        @Option(names = "--type", paramLabel = "<type>")
         HistoryWriter.TargetType type;
 
-        @Option(names = "--since", paramLabel = "<YYYY-MM-DD>", converter = DateConverter.class,
-                description = "Only scans on or after this date (local time)")
+        @Option(names = "--since", paramLabel = "<YYYY-MM-DD>", converter = DateConverter.class)
         LocalDate since;
 
-        @Option(names = "--until", paramLabel = "<YYYY-MM-DD>", converter = DateConverter.class,
-                description = "Only scans on or before this date (local time)")
+        @Option(names = "--until", paramLabel = "<YYYY-MM-DD>", converter = DateConverter.class)
         LocalDate until;
 
-        @Option(names = "--limit", paramLabel = "<n>", defaultValue = "20",
-                description = "Maximum number of scans to show (default: ${DEFAULT-VALUE}; 0 shows all)")
+        @Option(names = "--limit", paramLabel = "<n>", defaultValue = "20")
         int limit;
 
         SearchCommand(PrintStream out, PrintStream err, ZoneId zone) {
@@ -253,15 +221,10 @@ final class HistoryCommand implements Callable<Integer> {
             mixinStandardHelpOptions = true,
             versionProvider = Main.VersionProvider.class,
             sortOptions = false,
-            description = "Show totals: scans by risk level and type, and the most frequently flagged domains.",
-            synopsisHeading = "%nUsage:%n",
-            descriptionHeading = "%n",
-            optionListHeading = "%nOptions:%n"
-    )
+            descriptionHeading = "%n")
     static final class StatsCommand extends QueryCommand {
 
-        @Option(names = "--top", paramLabel = "<n>", defaultValue = "10",
-                description = "How many flagged domains to list (default: ${DEFAULT-VALUE})")
+        @Option(names = "--top", paramLabel = "<n>", defaultValue = "10")
         int top;
 
         StatsCommand(PrintStream out, PrintStream err, ZoneId zone) {

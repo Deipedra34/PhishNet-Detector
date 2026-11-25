@@ -29,24 +29,11 @@ import java.util.function.Function;
  */
 @Command(
         name = "phishnet " + Main.FEEDS_COMMAND,
+        resourceBundle = Main.MESSAGES_BUNDLE,
         mixinStandardHelpOptions = true,
         versionProvider = Main.VersionProvider.class,
         sortOptions = false,
-        synopsisSubcommandLabel = "COMMAND",
-        description = "Download or inspect the threat intelligence feeds of known phishing URLs "
-                + "(OpenPhish, and PhishTank when an API key is set). Scans refresh stale feeds on their own; "
-                + "--no-threat-feeds turns the feeds off for a scan.",
-        synopsisHeading = "%nUsage:%n",
-        descriptionHeading = "%n",
-        optionListHeading = "%nOptions:%n",
-        commandListHeading = "%nCommands:%n",
-        footerHeading = "%nExamples:%n",
-        footer = {
-                "  phishnet feeds update",
-                "  phishnet feeds status",
-                "  PHISHNET_PHISHTANK_API_KEY=<key> phishnet feeds update"
-        }
-)
+        descriptionHeading = "%n")
 final class FeedsCommand implements Callable<Integer> {
 
     @Spec
@@ -74,8 +61,7 @@ final class FeedsCommand implements Callable<Integer> {
     /** The {@code --config} option and service setup shared by both subcommands. */
     abstract static class FeedServiceCommand implements Callable<Integer> {
 
-        @Option(names = "--config", paramLabel = "<path>",
-                description = "Read the threatFeeds settings from this YAML config instead of the bundled default")
+        @Option(names = "--config", paramLabel = "<path>")
         String configPath;
 
         final PrintStream out;
@@ -107,13 +93,7 @@ final class FeedsCommand implements Callable<Integer> {
             mixinStandardHelpOptions = true,
             versionProvider = Main.VersionProvider.class,
             sortOptions = false,
-            description = "Download every enabled feed now and replace its cached copy, however fresh it is. "
-                    + "A feed that fails to download keeps its previous cached copy. "
-                    + "Exits 1 if any feed failed.",
-            synopsisHeading = "%nUsage:%n",
-            descriptionHeading = "%n",
-            optionListHeading = "%nOptions:%n"
-    )
+            descriptionHeading = "%n")
     static final class UpdateCommand extends FeedServiceCommand {
 
         UpdateCommand(PrintStream out, PrintStream err, Function<ThreatFeedSettings, ThreatFeedService> services) {
@@ -154,12 +134,7 @@ final class FeedsCommand implements Callable<Integer> {
             mixinStandardHelpOptions = true,
             versionProvider = Main.VersionProvider.class,
             sortOptions = false,
-            description = "Show each feed's cached copy: whether it's fresh, stale, or missing, when it was "
-                    + "last refreshed, and how many entries it has. Reads the cache only; never downloads.",
-            synopsisHeading = "%nUsage:%n",
-            descriptionHeading = "%n",
-            optionListHeading = "%nOptions:%n"
-    )
+            descriptionHeading = "%n")
     static final class StatusCommand extends FeedServiceCommand {
 
         StatusCommand(PrintStream out, PrintStream err, Function<ThreatFeedSettings, ThreatFeedService> services) {

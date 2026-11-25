@@ -45,26 +45,11 @@ import java.util.concurrent.Callable;
  */
 @Command(
         name = "phishnet " + Main.QUEUE_COMMAND,
+        resourceBundle = Main.MESSAGES_BUNDLE,
         mixinStandardHelpOptions = true,
         versionProvider = Main.VersionProvider.class,
         sortOptions = false,
-        synopsisSubcommandLabel = "COMMAND",
-        description = "Distributed scanning through a shared Redis queue: 'produce' queues URLs from a file, "
-                + "'worker' scans queued URLs. Run as many workers, on as many machines, as you like.",
-        synopsisHeading = "%nUsage:%n",
-        descriptionHeading = "%n",
-        optionListHeading = "%nOptions:%n",
-        commandListHeading = "%nCommands:%n",
-        footerHeading = "%nExamples:%n",
-        footer = {
-                "  docker run -d --name phishnet-redis -p 6379:6379 redis",
-                "  phishnet queue produce --file urls.txt",
-                "  phishnet queue worker --threads 8",
-                "  phishnet queue worker --redis-host queue.internal --retry --no-whois",
-                "",
-                "Set PHISHNET_REDIS_PASSWORD (and PHISHNET_REDIS_USERNAME) if your Redis needs a login."
-        }
-)
+        descriptionHeading = "%n")
 final class QueueCommand implements Callable<Integer> {
 
     static final String PASSWORD_ENV = "PHISHNET_REDIS_PASSWORD";
@@ -106,19 +91,16 @@ final class QueueCommand implements Callable<Integer> {
 
     /** Where the queue is - shared by both subcommands. */
     static final class RedisOptions {
-        @Option(names = "--redis-host", paramLabel = "<host>", defaultValue = RedisSettings.DEFAULT_HOST,
-                description = "Redis host (default: ${DEFAULT-VALUE})")
+        @Option(names = "--redis-host", paramLabel = "<host>", defaultValue = RedisSettings.DEFAULT_HOST)
         String host;
 
-        @Option(names = "--redis-port", paramLabel = "<port>", defaultValue = "" + RedisSettings.DEFAULT_PORT,
-                description = "Redis port (default: ${DEFAULT-VALUE})")
+        @Option(names = "--redis-port", paramLabel = "<port>", defaultValue = "" + RedisSettings.DEFAULT_PORT)
         int port;
 
-        @Option(names = "--redis-ssl", description = "Connect to Redis over TLS")
+        @Option(names = "--redis-ssl")
         boolean ssl;
 
-        @Option(names = "--queue", paramLabel = "<name>", defaultValue = RedisSettings.DEFAULT_QUEUE,
-                description = "Name of the Redis list used as the job queue (default: ${DEFAULT-VALUE})")
+        @Option(names = "--queue", paramLabel = "<name>", defaultValue = RedisSettings.DEFAULT_QUEUE)
         String queue;
 
         RedisSettings settings(CommandSpec spec, Map<String, String> env) {
@@ -140,11 +122,7 @@ final class QueueCommand implements Callable<Integer> {
             mixinStandardHelpOptions = true,
             versionProvider = Main.VersionProvider.class,
             sortOptions = false,
-            description = "Queue every URL in a file (one per line, '#' comments allowed) as a scan job.",
-            synopsisHeading = "%nUsage:%n",
-            descriptionHeading = "%n",
-            optionListHeading = "%nOptions:%n"
-    )
+            descriptionHeading = "%n")
     static final class ProduceCommand implements Callable<Integer> {
 
         @Spec
@@ -153,11 +131,10 @@ final class QueueCommand implements Callable<Integer> {
         @Mixin
         RedisOptions redis = new RedisOptions();
 
-        @Option(names = "--file", paramLabel = "<urls.txt>", required = true,
-                description = "File of URLs to queue, the same format as --batch")
+        @Option(names = "--file", paramLabel = "<urls.txt>", required = true)
         String file;
 
-        @Option(names = {"--quiet", "-q"}, description = "Print only the number of jobs queued")
+        @Option(names = {"--quiet", "-q"})
         boolean quiet;
 
         private final Environment environment;
@@ -223,12 +200,7 @@ final class QueueCommand implements Callable<Integer> {
             mixinStandardHelpOptions = true,
             versionProvider = Main.VersionProvider.class,
             sortOptions = false,
-            description = "Take URLs off the queue and scan them, recording each result in the scan history. "
-                    + "Runs until Ctrl+C (or, with --exit-when-empty, until the queue is empty).",
-            synopsisHeading = "%nUsage:%n",
-            descriptionHeading = "%n",
-            optionListHeading = "%nOptions:%n"
-    )
+            descriptionHeading = "%n")
     static final class WorkerCommand implements Callable<Integer> {
 
         @Spec
@@ -237,54 +209,45 @@ final class QueueCommand implements Callable<Integer> {
         @Mixin
         RedisOptions redis = new RedisOptions();
 
-        @Option(names = "--threads", paramLabel = "<n>",
-                description = "Jobs to scan in parallel, each thread with its own Redis connection "
-                        + "(default: one per CPU core)")
+        @Option(names = "--threads", paramLabel = "<n>")
         Integer threads;
 
-        @Option(names = "--retry",
-                description = "If Redis is unreachable or the connection drops, keep retrying with backoff "
-                        + "(2s doubling up to 1 min) instead of stopping with an error")
+        @Option(names = "--retry")
         boolean retry;
 
-        @Option(names = "--exit-when-empty",
-                description = "Stop once the queue is empty instead of waiting for more jobs")
+        @Option(names = "--exit-when-empty")
         boolean exitWhenEmpty;
 
-        @Option(names = "--no-whois", description = "Skip the live WHOIS domain-age lookup")
+        @Option(names = "--no-whois")
         boolean noWhois;
 
-        @Option(names = "--config", paramLabel = "<path>",
-                description = "Use a custom YAML config instead of the bundled default")
+        @Option(names = "--config", paramLabel = "<path>")
         String configPath;
 
-        @Option(names = "--history-file", paramLabel = "<path>",
-                description = "Scan history CSV (default: ./phishnet-history.csv)")
+        @Option(names = "--history-file", paramLabel = "<path>")
         String historyFile;
 
-        @Option(names = "--no-history", description = "Do not append results to the scan history CSV")
+        @Option(names = "--no-history")
         boolean noHistory;
 
-        @Option(names = "--history-db", paramLabel = "<path>",
-                description = "Scan history database (default: ~/.phishnet/phishnet-history.db)")
+        @Option(names = "--history-db", paramLabel = "<path>")
         String historyDb;
 
-        @Option(names = "--no-history-db", description = "Do not record results in the scan history database")
+        @Option(names = "--no-history-db")
         boolean noHistoryDb;
 
         @ArgGroup(exclusive = true, multiplicity = "0..1", heading = "%n")
         Verbosity verbosity = new Verbosity();
 
         static final class Verbosity {
-            @Option(names = {"--verbose", "-v"},
-                    description = "Also show every signal, the domain age, and which thread scanned each job")
+            @Option(names = {"--verbose", "-v"})
             boolean verbose;
 
-            @Option(names = {"--quiet", "-q"}, description = "Print only one line per job (LEVEL SCORE TARGET)")
+            @Option(names = {"--quiet", "-q"})
             boolean quiet;
         }
 
-        @Option(names = "--no-color", description = "Disable ANSI colors even if the terminal supports them")
+        @Option(names = "--no-color")
         boolean noColor;
 
         private final Environment environment;

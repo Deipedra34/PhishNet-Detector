@@ -45,27 +45,11 @@ import java.util.concurrent.Callable;
  */
 @Command(
         name = "phishnet " + Main.MONITOR_COMMAND,
+        resourceBundle = Main.MESSAGES_BUNDLE,
         mixinStandardHelpOptions = true,
         versionProvider = Main.VersionProvider.class,
         sortOptions = false,
-        description = "Watch a mailbox over IMAP (or POP3) and scan each new email for phishing as it arrives. "
-                + "Read-only unless --flag-suspicious or --move-to-folder is given. Runs until Ctrl+C.",
-        synopsisHeading = "%nUsage:%n",
-        descriptionHeading = "%n",
-        optionListHeading = "%nOptions:%n",
-        footerHeading = "%nExamples:%n",
-        footer = {
-                "  phishnet monitor --host imap.gmail.com --username you@gmail.com --ssl",
-                "  phishnet monitor --host mail.example.com --username alice --starttls \\",
-                "      --password",
-                "  PHISHNET_MAIL_PASSWORD=... phishnet monitor --host mail.example.com \\",
-                "      --username alice --ssl --flag-suspicious --move-to-folder Suspicious",
-                "",
-                "Gmail, Outlook.com, iCloud and Yahoo need an app password (or --oauth2),",
-                "not your regular account password. See the README's \"Real-Time Email",
-                "Monitoring\" section for provider settings and security notes."
-        }
-)
+        descriptionHeading = "%n")
 final class MonitorCommand implements Callable<Integer> {
 
     static final String PASSWORD_ENV = "PHISHNET_MAIL_PASSWORD";
@@ -98,112 +82,88 @@ final class MonitorCommand implements Callable<Integer> {
 
     // --- mailbox ------------------------------------------------------------------------
 
-    @Option(names = "--host", paramLabel = "<host>", required = true,
-            description = "Mail server, e.g. imap.gmail.com")
+    @Option(names = "--host", paramLabel = "<host>", required = true)
     private String host;
 
-    @Option(names = "--port", paramLabel = "<port>",
-            description = "Server port (default: 993 for IMAP with --ssl, 143 without; 995/110 for POP3)")
+    @Option(names = "--port", paramLabel = "<port>")
     private Integer port;
 
-    @Option(names = "--username", paramLabel = "<user>",
-            description = "Login name, usually your email address (or set " + USERNAME_ENV + ")")
+    @Option(names = "--username", paramLabel = "<user>")
     private String username;
 
     @Option(names = "--password", interactive = true, arity = "0", echo = false,
-            prompt = "Mail password (input hidden): ",
-            description = "Prompt for the password without echoing it. Without this option the password is "
-                    + "read from " + PASSWORD_ENV + ", or prompted for when running in a terminal. "
-                    + "It is never accepted as a plain command-line value.")
+            prompt = "Mail password (input hidden): ")
     private char[] password;
 
-    @Option(names = "--protocol", paramLabel = "<protocol>", defaultValue = "IMAP",
-            description = "${COMPLETION-CANDIDATES} (default: ${DEFAULT-VALUE}). POP3 is polling-only and read-only.")
+    @Option(names = "--protocol", paramLabel = "<protocol>", defaultValue = "IMAP")
     private MailProtocol protocol;
 
-    @ArgGroup(exclusive = true, multiplicity = "1", heading = "%nEncryption (one is required):%n")
+    @ArgGroup(exclusive = true, multiplicity = "1", headingKey = "phishnet monitor.group.ssl")
     private SecurityOptions security;
 
     private static final class SecurityOptions {
-        @Option(names = "--ssl", description = "Use TLS from the start (IMAPS / POP3S) - the usual choice")
+        @Option(names = "--ssl")
         boolean ssl;
 
-        @Option(names = "--starttls", description = "Connect in plain text, then require an upgrade with STARTTLS")
+        @Option(names = "--starttls")
         boolean starttls;
 
-        @Option(names = "--allow-plaintext",
-                description = "No encryption at all: the password is sent readable. Only for a local test server.")
+        @Option(names = "--allow-plaintext")
         boolean plaintext;
     }
 
-    @Option(names = "--folder", paramLabel = "<name>", defaultValue = MailServerSettings.DEFAULT_FOLDER,
-            description = "IMAP folder to watch (default: ${DEFAULT-VALUE})")
+    @Option(names = "--folder", paramLabel = "<name>", defaultValue = MailServerSettings.DEFAULT_FOLDER)
     private String folder;
 
-    @Option(names = "--oauth2",
-            description = "Log in with OAuth2 (SASL XOAUTH2): the password value is an access token you obtained "
-                    + "from your provider")
+    @Option(names = "--oauth2")
     private boolean oauth2;
 
-    @Option(names = "--poll-interval", paramLabel = "<seconds>", defaultValue = "60",
-            description = "How often to check for new mail when the server doesn't support IMAP IDLE, "
-                    + "and always for POP3 (default: ${DEFAULT-VALUE}, minimum " + MIN_POLL_SECONDS + ")")
+    @Option(names = "--poll-interval", paramLabel = "<seconds>", defaultValue = "60")
     private int pollSeconds;
 
     // --- actions ------------------------------------------------------------------------
 
-    @Option(names = "--act-on", paramLabel = "<level>", defaultValue = "MEDIUM",
-            description = "Lowest risk level treated as suspicious: MEDIUM or HIGH (default: ${DEFAULT-VALUE})")
+    @Option(names = "--act-on", paramLabel = "<level>", defaultValue = "MEDIUM")
     private RiskLevel actOn;
 
-    @Option(names = "--flag-suspicious",
-            description = "Opt in: mark suspicious messages with \\Flagged (and the $Phishing keyword where "
-                    + "allowed). Changes the mailbox; IMAP only.")
+    @Option(names = "--flag-suspicious")
     private boolean flagSuspicious;
 
-    @Option(names = "--move-to-folder", paramLabel = "<name>",
-            description = "Opt in: move suspicious messages to this folder, creating it if needed. "
-                    + "Changes the mailbox; IMAP only.")
+    @Option(names = "--move-to-folder", paramLabel = "<name>")
     private String moveToFolder;
 
-    @Option(names = "--record-all",
-            description = "Record every scanned message in the scan history, not only suspicious ones")
+    @Option(names = "--record-all")
     private boolean recordAll;
 
     // --- history / output / config -----------------------------------------------------------
 
-    @Option(names = "--history-file", paramLabel = "<path>",
-            description = "Scan history CSV (default: ./phishnet-history.csv)")
+    @Option(names = "--history-file", paramLabel = "<path>")
     private String historyFile;
 
-    @Option(names = "--no-history", description = "Do not append results to the scan history CSV")
+    @Option(names = "--no-history")
     private boolean noHistory;
 
-    @Option(names = "--history-db", paramLabel = "<path>",
-            description = "Scan history database (default: ~/.phishnet/phishnet-history.db)")
+    @Option(names = "--history-db", paramLabel = "<path>")
     private String historyDb;
 
-    @Option(names = "--no-history-db", description = "Do not record results in the scan history database")
+    @Option(names = "--no-history-db")
     private boolean noHistoryDb;
 
-    @Option(names = "--config", paramLabel = "<path>",
-            description = "Use a custom YAML config instead of the bundled default")
+    @Option(names = "--config", paramLabel = "<path>")
     private String configPath;
 
     @ArgGroup(exclusive = true, multiplicity = "0..1", heading = "%n")
     private Verbosity verbosity = new Verbosity();
 
     private static final class Verbosity {
-        @Option(names = {"--verbose", "-v"},
-                description = "Also show every message's signals and mailbox label, and connection attempts")
+        @Option(names = {"--verbose", "-v"})
         boolean verbose;
 
-        @Option(names = {"--quiet", "-q"},
-                description = "Print only one line per scanned message (LEVEL SCORE LABEL)")
+        @Option(names = {"--quiet", "-q"})
         boolean quiet;
     }
 
-    @Option(names = "--no-color", description = "Disable ANSI colors even if the terminal supports them")
+    @Option(names = "--no-color")
     private boolean noColor;
 
     private final PrintStream out;

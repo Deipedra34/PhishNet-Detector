@@ -35,78 +35,47 @@ import java.util.function.Function;
  */
 @Command(
         name = "phishnet " + Main.SERVE_COMMAND,
+        resourceBundle = Main.MESSAGES_BUNDLE,
         mixinStandardHelpOptions = true,
         versionProvider = Main.VersionProvider.class,
         sortOptions = false,
-        description = "Start an HTTP server exposing the scanner as a JSON REST API "
-                + "(POST /api/scan/url, POST /api/scan/email, GET /api/health), plus read-only history and "
-                + "feed status endpoints and, when it has been built, the web dashboard on the same port.",
-        synopsisHeading = "%nUsage:%n",
-        descriptionHeading = "%n",
-        optionListHeading = "%nOptions:%n",
-        footerHeading = "%nExamples:%n",
-        footer = {
-                "  phishnet serve",
-                "  phishnet serve --port 9090 --no-whois",
-                "  phishnet serve --dashboard dashboard/dist",
-                "  phishnet serve --regenerate-key      (replace the API key)",
-                "  phishnet serve --no-auth             (local development only: no API key)"
-        }
-)
+        descriptionHeading = "%n")
 final class ServeCommand implements Callable<Integer> {
 
     @Spec
     private CommandSpec spec;
 
-    @Option(names = "--port", paramLabel = "<port>", defaultValue = "" + ApiServer.DEFAULT_PORT,
-            description = "TCP port to listen on (default: ${DEFAULT-VALUE}; 0 picks a free port)")
+    @Option(names = "--port", paramLabel = "<port>", defaultValue = "" + ApiServer.DEFAULT_PORT)
     private int port;
 
-    @Option(names = "--config", paramLabel = "<path>",
-            description = "Use a custom YAML config instead of the bundled default")
+    @Option(names = "--config", paramLabel = "<path>")
     private String configPath;
 
-    @Option(names = "--no-whois",
-            description = "Skip the live WHOIS domain-age lookup for URL scans")
+    @Option(names = "--no-whois")
     private boolean noWhois;
 
-    @Option(names = "--history-db", paramLabel = "<path>",
-            description = "Record API scans in this SQLite database "
-                    + "(default: ~/.phishnet/phishnet-history.db; query it with: phishnet history)")
+    @Option(names = "--history-db", paramLabel = "<path>")
     private String databaseFile;
 
-    @Option(names = "--no-history-db",
-            description = "Do not record API scans in the scan history database")
+    @Option(names = "--no-history-db")
     private boolean noHistoryDb;
 
-    @Option(names = "--dashboard", paramLabel = "<dir>",
-            description = "Serve the built web dashboard from this directory (default: $"
-                    + DASHBOARD_DIR_ENV + ", else ./dashboard/dist, else a dashboard/ folder next to the jar - "
-                    + "the first that contains an index.html)")
+    @Option(names = "--dashboard", paramLabel = "<dir>")
     private String dashboardDir;
 
-    @Option(names = "--no-dashboard",
-            description = "Serve the REST API only, without the web dashboard")
+    @Option(names = "--no-dashboard")
     private boolean noDashboard;
 
-    @Option(names = "--api-key-file", paramLabel = "<path>",
-            description = "Where the API key is kept (default: ~/.phishnet/api-key; created with a new random "
-                    + "key on first run). $" + ApiKeyStore.KEY_ENV + ", when set, is used instead.")
+    @Option(names = "--api-key-file", paramLabel = "<path>")
     private String apiKeyFile;
 
-    @Option(names = "--regenerate-key",
-            description = "Replace the API key with a new random one before starting (printed once). "
-                    + "The old key stops working; give the new one to every client.")
+    @Option(names = "--regenerate-key")
     private boolean regenerateKey;
 
-    @Option(names = "--rate-limit", paramLabel = "<requests-per-minute>",
-            description = "Scan requests each client IP may make per minute before getting 429 Too Many Requests "
-                    + "(default: api.rateLimitPerMinute from the config, 60; 0 turns it off)")
+    @Option(names = "--rate-limit", paramLabel = "<requests-per-minute>")
     private Integer rateLimit;
 
-    @Option(names = "--no-auth",
-            description = "Don't require an API key: anyone who can reach this port can scan and read the scan "
-                    + "history. Meant for local development only.")
+    @Option(names = "--no-auth")
     private boolean noAuth;
 
     /** Environment variable naming the built dashboard directory (set in the Docker image). */
