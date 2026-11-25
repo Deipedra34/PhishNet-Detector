@@ -334,9 +334,10 @@ public final class Main implements Callable<Integer> {
         cmd.setParameterExceptionHandler((ParameterException ex, String[] cmdArgs) -> {
             PrintWriter errWriter = ex.getCommandLine().getErr();
             // Some picocli exceptions (e.g. a required ArgGroup violation) already bake an
-            // "Error: " prefix into getMessage(); avoid doubling it up for those.
+            // English "Error: " prefix into getMessage(); replace it rather than doubling it up.
             String message = ex.getMessage();
-            errWriter.println(message.startsWith("Error: ") ? message : Messages.text("cli.error", message));
+            errWriter.println(Messages.text("cli.error",
+                    message.startsWith("Error: ") ? message.substring("Error: ".length()) : message));
             errWriter.println();
             ex.getCommandLine().usage(errWriter, ex.getCommandLine().getColorScheme());
             return ex.getCommandLine().getCommandSpec().exitCodeOnInvalidInput();
