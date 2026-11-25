@@ -1,5 +1,6 @@
 package com.phishnet.i18n;
 
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.MissingResourceException;
@@ -19,6 +20,9 @@ public final class Messages {
 
     /** Base name of the bundle, under {@code src/main/resources/i18n/}. */
     public static final String BUNDLE = "i18n.messages";
+
+    /** The languages with a translation, as ISO 639 codes; the first is the default. */
+    public static final List<String> LANGUAGES = List.of("en", "tr");
 
     /**
      * Never falls back to the JVM's default locale: asking for English on a Turkish
@@ -48,6 +52,11 @@ public final class Messages {
             Locale effective = bundle.getLocale().getLanguage().isEmpty() ? Locale.ENGLISH : bundle.getLocale();
             return new Messages(effective, bundle);
         });
+    }
+
+    /** Whether {@code language} (an ISO 639 code such as "tr") has a translation. */
+    public static boolean isSupported(String language) {
+        return language != null && LANGUAGES.contains(language.toLowerCase(Locale.ROOT));
     }
 
     public static Messages english() {

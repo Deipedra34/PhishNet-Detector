@@ -16,6 +16,8 @@
         <maven.compiler.source>26</maven.compiler.source>
         <maven.compiler.target>26</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <!-- Filled in by JaCoCo's prepare-agent; empty when it doesn't run. -->
+        <argLine></argLine>
 
         <junit.version>5.10.2</junit.version>
         <snakeyaml.version>2.2</snakeyaml.version>
@@ -181,6 +183,10 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>${maven.surefire.plugin.version}</version>
+                <configuration>
+                    <!-- With no language option the CLI follows the system language; tests expect English. -->
+                    <argLine>@{argLine} -Duser.language=en -Duser.country=US</argLine>
+                </configuration>
             </plugin>
 
             <!-- Builds the runnable fat jar: java -jar phishnet.jar -->

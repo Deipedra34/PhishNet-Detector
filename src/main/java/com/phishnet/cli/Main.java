@@ -43,6 +43,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.Properties;
 import java.util.concurrent.Callable;
 import java.util.function.Function;
@@ -232,8 +233,17 @@ public final class Main implements Callable<Integer> {
      * threat feed service built by {@code threatFeeds} from the config's feed settings
      * (for tests that serve canned feeds).
      */
-    static int run(String[] args, PrintStream out, PrintStream err, WhoisClient whoisClient,
+    static int run(String[] rawArgs, PrintStream out, PrintStream err, WhoisClient whoisClient,
                    Function<ThreatFeedSettings, ThreatFeedService> threatFeeds) {
+        // The language comes first: every command's help and output depends on it.
+        LanguageOption.Selection language = LanguageOption.select(rawArgs, Locale.getDefault());
+        Messages.setCurrent(language.messages());
+        if (language.unsupportedValue() != null) {
+            err.println(Messages.english().get("cli.lang.unsupported", language.unsupportedValue(),
+                    String.join(", ", Messages.LANGUAGES)));
+        }
+        String[] args = language.remainingArgs();
+
         // "serve" is dispatched here instead of being registered as a picocli subcommand:
         // picocli would still enforce this command's required --url/--email/--batch group
         // for "phishnet serve", and relaxing that group would change normal CLI parsing.
@@ -311,6 +321,7 @@ public final class Main implements Callable<Integer> {
         cmd.setOut(new PrintWriter(out, true, StandardCharsets.UTF_8));
         cmd.setErr(new PrintWriter(err, true, StandardCharsets.UTF_8));
         // Help text in the run's language (subcommands included); English for any key it lacks.
+        LanguageOption.addTo(cmd);
         cmd.setResourceBundle(Messages.current().bundle());
 
         // Same --no-color / NO_COLOR / non-TTY rules as the risk-level colors (AnsiColor/ColorSupport),
